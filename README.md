@@ -1,0 +1,2 @@
+因为训练最小的GPT2都要8卡A100，我只好搞babyGPT了。
+nanoGPT的config很难懂
