@@ -1,10 +1,10 @@
-import logging
-logger = logging.getLogger(__name__)
-
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
 from omegaconf import OmegaConf, DictConfig
+from torch.nn import functional as F
+import torch.nn as nn
+import torch
+import logging
+import inspect
+logger = logging.getLogger(__name__)
 
 
 """
@@ -65,6 +65,7 @@ class MyCausalSelfAttention(nn.Module):
         automatically expanded to be of equal sizes (without making copies of the data).
         so the view should be unnecessary
         """
+        # TODO: why attn mask need grad? or it doesn't
         self.register_buffer("mask", torch.tril(torch.ones(
             cfg.block_size, cfg.block_size)).view(1, 1, cfg.block_size, cfg.block_size))
 
@@ -100,7 +101,8 @@ class MyCausalSelfAttention(nn.Module):
         # TODO: what if no contiguous?
         y = y.transpose(1, 2).contiguous().view(B, T, C)
 
-        return self.proj_drop(self.c_proj(y))
+        return self.proj_drop(self.proj(y))
+
 
 class MLP(nn.Module):
     def __init__(self, cfg):
@@ -185,3 +187,103 @@ class GPT(nn.Module):
         B, T = tokens.size()
         assert T <= self.cfg.block_size, \
             f"Cannot forward sequence of length {T}, block size is only {self.cfg.block_size}"
+        pos = torch.arange(0, T, dtype=torch.int64, device=device)
+
+        # forward the GPT model itself
+        tok_emb = self.transformer.wte(tokens)
+        pos_emb = self.transformer.wpe(pos)
+        x = self.transformer.drop(tok_emb + pos_emb)
+        for block in self.transformer.blocks:
+            x = block(x)
+        x = self.transformer.ln(x)
+
+        if targets is not None:
+            # if we are given some desired targets also calculate the loss
+            logits = self.lm_head(x)
+            """
+            input: (B, T, vocab_size) -> (B * T, vocab_size)
+            target: (B, T) -> (B * T)
+            ignore_index: some sentence does not fill the length of block_size
+            so maybe they are padded with -1
+            """
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            return logits, loss
+        else:
+            # inference-time mini-optimization: only forward the lm_head on the very last position
+            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            return logits
+    
+    def configure_optimizer(self, cfg):
+        weight_decay = cfg.weight_decay
+        learning_rate = cfg.learning_rate
+        betas = (cfg.beta1, cfg.beta2)
+        # start with all parameters
+        param_dict: dict = {pn: p for pn, p in self.named_parameters()}
+        # filter out those that shouldn't be trained
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        logger.debug(
+            f"parameters don't need grad: "
+            f"{[pn for pn, p in self.named_parameters() if not p.requires_grad]}")
+        
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        # TODO: does it really works?
+        decay_params = [p for p in param_dict.values() if p.dim() >= 2]
+        nodecay_params = [p for p in param_dict.values() if p.dim() < 2]
+        optim_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": nodecay_params, "weight_decay": 0.0},
+        ]
+
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        logger.info(
+            f"num decayed parameter tensors: "
+            f"{len(decay_params)}, with {num_decay_params:,} parameters")
+        logger.info(
+            f"num non-decayed parameter tensors: "
+            f"{len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+
+        """
+        fused: https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
+        If the user specifies True for both foreach and fused, 
+        we will prioritize fused over foreach, as it is typically faster.
+        HOWEVER, since the fused implementation is relatively new, we want to 
+        give it sufficient bake-in time, so we default to foreach and NOT fused 
+        when the user has not specified either flag.
+        """
+        use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        # it seems that fused supports cpu
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        print(f"using fused AdamW: {use_fused}")
+
+        return optimizer
+    
+    @torch.no_grad
+    def generate(self, tokens, max_new_tokens, temperature=1.0, topk=None):
+        """
+        tokens: (B, T), dtype=torch.int64
+        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+        """
+        for _ in range(max_new_tokens):
+            # crop conditioning tokens to block_size
+            if tokens.size(1) > self.cfg.block_size:
+                tokens_cond = tokens[:, -self.cfg.block_size:]
+            else:
+                tokens_cond = tokens
+
+            logits = self(tokens_cond)
+            logits = logits[:, -1, :] / temperature
+            if topk is not None:
+                v, _ = torch.topk(logits, k=topk)
+                # torch.topk retuens are sorted
+                # so -1 is the smallest
+                logits[logits < v[:, [-1]]] = float('-inf')
+            probs = F.softmax(logits, dim=-1)
+            # although num_samples=1, it returns a (B, 1) tensor
+            next_token = torch.multinomial(probs, num_samples=1)
+
+            tokens = torch.cat((tokens, next_token), dim=1)
+        return tokens
