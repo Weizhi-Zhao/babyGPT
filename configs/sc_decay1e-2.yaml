@@ -1,5 +1,5 @@
 model: 'configs/models/babyGPT.yaml'
-optimizer: 'configs/optimizers/default_optimizer.yaml'
+optimizer: 'configs/optimizers/optim_decay1e-2.yaml'
 dataset: 'configs/datasets/shakespeare_char_set.yaml'
 trainer: 'configs/trainers/default_trainer.yaml'
 

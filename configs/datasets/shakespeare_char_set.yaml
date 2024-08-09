@@ -1,5 +1,5 @@
 dataset_name: shakespeare_char
 train_set_path: "data/shakespeare_char/train.npy"
-val_set_path: "data/shakespeare_char/val.npy"
+test_set_path: "data/shakespeare_char/test.npy"
 meta_path: "data/shakespeare_char/meta.pkl"
 vocab_size: 65

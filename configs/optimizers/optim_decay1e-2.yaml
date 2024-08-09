@@ -1,5 +1,5 @@
 learning_rate: 1e-3 # with baby networks can afford to go a bit higher
 beta2: 0.99 # make a bit bigger because number of tokens per iter is small
-# TODO: is 1e-2 better?
-weight_decay: 1e-1
+# is 1e-2 better? NO, 1e-1 YES!!
+weight_decay: 1e-2
 beta1: 0.9

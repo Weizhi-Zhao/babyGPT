@@ -1,0 +1,4 @@
+INFO - GPT parameter number: 10.65M
+DEBUG - parameters don't need grad: []
+INFO - num decayed parameter tensors: 26, with 10,740,096 parameters
+INFO - num non-decayed parameter tensors: 13, with 4,992 parameters

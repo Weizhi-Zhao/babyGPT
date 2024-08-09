@@ -1,4 +1,4 @@
-model: 'configs/models/babyGPT.yaml'
+model: 'configs/models/babyGPT_bias.yaml'
 optimizer: 'configs/optimizers/default_optimizer.yaml'
 dataset: 'configs/datasets/shakespeare_char_set.yaml'
 trainer: 'configs/trainers/default_trainer.yaml'

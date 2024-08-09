@@ -2,18 +2,17 @@ from omegaconf import OmegaConf, DictConfig
 from torch.nn import functional as F
 import torch.nn as nn
 import torch
-import logging
+from loguru import logger
 import inspect
-logger = logging.getLogger(__name__)
+import math
 
 
 """
-TODO: confirm that MultiheadAttention and myAttention are equivalent
-TODO: test MultiheadAttention performance with different configurations
-TODO: is disable bias really better?
-TODO: relu ot gelu?
-TODO: how to use Nested Tensor
-TODO: what if use nn.TransformerDecoder and nn.TransformerDecoderLayer?
+nn.MultiheadAttention's loss is slightly higher than myAttention
+TODO: Does nn.MultiheadAttention inference faster?
+how to use Nested Tensor. due to Nested Tensor conflict with attn mask, put it later
+what if use nn.TransformerDecoder and nn.TransformerDecoderLayer? No it contains cross attention
+is DROP out inplace better? no, inplace is slower and worse
 """
 
 
@@ -29,10 +28,14 @@ class CausalSelfAttention(nn.Module):
                                             dropout=cfg.dropout,
                                             bias=cfg.bias,
                                             batch_first=True)
-        self.dropout = nn.Dropout(cfg.dropout) # cause nn.MultiheadAttention only dropout attention weights
+        self.register_buffer("mask", torch.tril(torch.ones(cfg.block_size, cfg.block_size)))
+
+        # cause nn.MultiheadAttention only dropout attention weights
+        self.dropout = nn.Dropout(cfg.dropout) 
 
     def forward(self, x: torch.Tensor):
-        x = self.c_attn(x, x, x, need_weights=False, is_causal=True)
+        x, _ = self.c_attn(x, x, x, need_weights=False,
+                           attn_mask=self.mask, is_causal=True)
         x = self.dropout(x)
         return x
 
@@ -58,22 +61,18 @@ class MyCausalSelfAttention(nn.Module):
         2. buffer will handle device and parallel
         3. buffer will appear in state_dict
         """
-        # TODO: what if no view here?
+        # what if no view here? view doesn't mater
         """
         masked_fill: The shape of mask must be broadcastable with the shape of the underlying tensor.
         In short, if a PyTorch operation supports broadcast, then its Tensor arguments can be
         automatically expanded to be of equal sizes (without making copies of the data).
         so the view should be unnecessary
         """
-        # TODO: why attn mask need grad? or it doesn't
-        self.register_buffer("mask", torch.tril(torch.ones(
-            cfg.block_size, cfg.block_size)).view(1, 1, cfg.block_size, cfg.block_size))
+        # why attn mask need grad? or it doesn't? it really doesn't require grad
+        self.register_buffer("mask", torch.tril(torch.ones(cfg.block_size, cfg.block_size)))
 
     def forward(self, x: torch.Tensor):
         B, T, C = x.size()
-        torch.split
-        torch.tensor_split
-        torch.chunk
         """
         what is th difference between torch.split, torch.tensor_split and torch.chunk?
         split and tensor_split split tensor by size
@@ -94,11 +93,11 @@ class MyCausalSelfAttention(nn.Module):
 
         attn_weights = q @ k.transpose(-2, -1) / (k.size(-1) ** 0.5)
         # block_size for max sequence length, T <= block_size
-        attn_weights = attn_weights.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        attn_weights = attn_weights.masked_fill(self.mask[:T, :T] == 0, float("-inf"))
         attn_weights = F.softmax(attn_weights, dim=-1)
         attn_weights = self.attn_drop(attn_weights)
         y = attn_weights @ v
-        # TODO: what if no contiguous?
+        # what if no contiguous? must use contiguous()
         y = y.transpose(1, 2).contiguous().view(B, T, C)
 
         return self.proj_drop(self.proj(y))
@@ -128,7 +127,8 @@ class Block(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.ln1 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.attn = MyCausalSelfAttention(cfg)
+        # self.attn = MyCausalSelfAttention(cfg)
+        self.attn = CausalSelfAttention(cfg)
         self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
@@ -154,21 +154,20 @@ class GPT(nn.Module):
         ))
 
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
-        # TODO: really better?
+        # really better? weight tying, YES!!!
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
-        """
-        TODO: is this code better?
+        '''
+        # is this code better? no
         # init all weights
         self.apply(self._init_weights)
-        TODO: is this code better?
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
-        """
+                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * cfg.n_layer))
+        '''
 
-        logger.info(f"GPT parameter number: {self.get_num_params():.2f}M")
+        logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
 
     def get_num_params(self, non_embedding=True):
         """
@@ -228,13 +227,18 @@ class GPT(nn.Module):
         
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        # TODO: does it really works?
+        # it is a little worse
         decay_params = [p for p in param_dict.values() if p.dim() >= 2]
         nodecay_params = [p for p in param_dict.values() if p.dim() < 2]
         optim_groups = [
             {"params": decay_params, "weight_decay": weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
+        # optim_groups = [
+        #     {"params": decay_params, "weight_decay": weight_decay},
+        #     {"params": nodecay_params, "weight_decay": weight_decay},
+        # ]
+
 
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
@@ -277,7 +281,7 @@ class GPT(nn.Module):
             logits = self(tokens_cond)
             logits = logits[:, -1, :] / temperature
             if topk is not None:
-                v, _ = torch.topk(logits, k=topk)
+                v, _ = torch.topk(logits, k=min(topk, logits.size(-1)))
                 # torch.topk retuens are sorted
                 # so -1 is the smallest
                 logits[logits < v[:, [-1]]] = float('-inf')

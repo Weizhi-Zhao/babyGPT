@@ -1,0 +1,6 @@
+INFO - GPT parameter number: 10.67M
+DEBUG - parameters don't need grad: []
+INFO - num decayed parameter tensors: 27, with 10,765,056 parameters
+INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
+INFO - Final train loss 1.0158695887915696, test loss 1.5152713181097297
+INFO - Training time: 501.12 seconds
