@@ -4,4 +4,3 @@ n_embd: 384
 dropout: 0.2
 block_size: 256
 bias: False
-act: gelu

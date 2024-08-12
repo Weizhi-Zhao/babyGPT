@@ -9,7 +9,7 @@ import math
 
 """
 nn.MultiheadAttention's loss is slightly higher than myAttention
-TODO: Does nn.MultiheadAttention inference faster?
+Does nn.MultiheadAttention inference faster? yes
 how to use Nested Tensor. due to Nested Tensor conflict with attn mask, put it later
 what if use nn.TransformerDecoder and nn.TransformerDecoderLayer? No it contains cross attention
 is DROP out inplace better? no, inplace is slower and worse
@@ -107,13 +107,15 @@ class MLP(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.fc1 = nn.Linear(cfg.n_embd, 4 * cfg.n_embd, bias=cfg.bias)
-        match cfg.act:
-            case "gelu":
-                self.act = nn.GELU()
-            case "relu":
-                self.act = nn.ReLU(inplace=True)
+        self.act = nn.GELU()
         self.fc2 = nn.Linear(4 * cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.dropout = nn.Dropout(cfg.dropout)
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        # nn.init.kaiming_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -146,28 +148,24 @@ class GPT(nn.Module):
         self.cfg = cfg
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(cfg.vocab_size, cfg.n_embd),
+            wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
             wpe = nn.Embedding(cfg.block_size, cfg.n_embd),
             drop = nn.Dropout(cfg.dropout), # drop token+position
             blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)]),
             ln = nn.LayerNorm(cfg.n_embd, bias=cfg.bias), # final layer norm
         ))
 
+        # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
-        # really better? weight tying, YES!!!
+        # really better? weight tying, YES!!! or maybe not
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
-        '''
-        # is this code better? no
-        # init all weights
-        self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * cfg.n_layer))
-        '''
-
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(self.lm_head.weight)
 
     def get_num_params(self, non_embedding=True):
         """

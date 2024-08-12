@@ -85,7 +85,7 @@ def save_loss_fig(losses: list[dict[Literal["train", "test"]: float]], cfg: Dict
     ax.set_ylabel('Loss')
     ax.set_title('Train and Test Loss')
     ax.legend()
-    fig.savefig(os.path.join(cfg.out_dir, 'loss.jpg'),
+    fig.savefig(os.path.join(cfg.out_dir, 'loss.png'),
                 dpi=300, bbox_inches='tight')
 
 
