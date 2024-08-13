@@ -3,35 +3,48 @@ from pathlib import Path
 import argparse
 import numpy as np
 import pickle
-import requests
+import os
 import sys
 import torch
+import json
+
+# ! s for <s>, e for </s>
 
 def main():
-    # download data
-    data_path = Path(__file__).parent / 'data.txt'
-    data_url = 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
-    if data_path.exists() == False:
-        with open(data_path, 'w', encoding='utf-8') as f:
-            f.write(requests.get(data_url).text)
-
     # read data
-    with open(data_path, 'r', encoding='utf-8') as f:
-        data = f.read()
+    data_path = Path(__file__).parent
+    data = ""
+    unique_chars = set()
+    for root, dirs, files in os.walk(data_path):
+        for file in files:
+            if not file.endswith('.json'):
+                continue
+            with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                poetrys = json.load(f)
+            for p in poetrys:
+                x = p['title'] + '\n' + p['content']
+                unique_chars.update(set(x))
+                data += 's' + x + 'e'
     logger.info(f"length of data in character: {len(data):,}") # ;, is insert thousand separators
 
     # get all unique chars in dataset
-    unique_chars = sorted(list(set(data)))
+    unique_chars = sorted(list(unique_chars))
     vocab_size = len(unique_chars)
-    logger.info(f"all the unique characters: {''.join(unique_chars)}")
-    logger.info(f"vocab size: {vocab_size}")
 
     # create mapping between characters and integers
     ctoi = {c: i for i, c in enumerate(unique_chars)}
+    # special tokens
+    ctoi['s'] = vocab_size
+    ctoi['e'] = vocab_size + 1
     itoc = {i: c for i, c in enumerate(unique_chars)}
+    itoc[vocab_size] = 's'
+    itoc[vocab_size + 1] = 'e'
     encode = lambda s: [ctoi[c] for c in s] # s for string
     decode = lambda l: "".join(itoc[i] for i in l) # l for list
-    logger.debug(f"test encoder & decoder: {decode(encode('Hello World!'))}")
+    logger.debug(f"test encoder & decoder: {decode(encode('白日依山尽，黄河入海流。'))}")
+
+    vocab_size += 2 # +2 for 's' and 'e'
+    logger.info(f"vocab size: {vocab_size}")
 
     # create train and test splits
     n = len(data)
@@ -44,15 +57,9 @@ def main():
     logger.info(f"train set has {len(train_tokens):,} tokens")
     logger.info(f"test set has {len(test_tokens):,} tokens")
 
-    # export to bin(npy) files
-    train_tokens = np.array(train_tokens, dtype=np.uint16)
-    test_tokens = np.array(test_tokens, dtype=np.uint16)
-    # train_tokens.tofile(Path(__file__).parent / 'train.npy')
-    # test_tokens.tofile(Path(__file__).parent / 'test.npy')
-    torch.save(torch.from_numpy(train_tokens.astype(np.int16)),
-               Path(__file__).parent / 'train.pt')
-    torch.save(torch.from_numpy(test_tokens.astype(np.int16)),
-               Path(__file__).parent / 'test.pt')
+    # export to .pt files
+    torch.save(torch.tensor(train_tokens, dtype=torch.long), Path(__file__).parent / 'train.pt')
+    torch.save(torch.tensor(test_tokens, dtype=torch.long), Path(__file__).parent / 'test.pt')
 
     # save meta information
     meta = {

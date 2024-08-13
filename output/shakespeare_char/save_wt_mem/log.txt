@@ -1,8 +1,0 @@
-INFO - GPT parameter number: 10.65M
-DEBUG - parameters don't need grad: []
-INFO - num decayed parameter tensors: 26, with 10,740,096 parameters
-INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
-INFO - 42.58 MB CUDA memory allocated for model and optimizer
-INFO - Final train loss 1.1689728739895398, test loss 1.4778926674323747
-INFO - 2817.40 MB CUDA memory allocated for training
-INFO - Training time: 487.74 seconds

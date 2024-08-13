@@ -1,0 +1,5 @@
+dataset_name: chinese_poetry
+train_set_path: "data/chinese_poetry/train.pt"
+test_set_path: "data/chinese_poetry/test.pt"
+meta_path: "data/chinese_poetry/meta.pkl"
+vocab_size: 13836

@@ -1,8 +1,8 @@
 n_layer: 6
 n_head: 6
 n_embd: 384
-dropout: 0.2
-block_size: 256
+dropout: 0.1
+block_size: 80
 bias: False
 
 # n_layer: 6

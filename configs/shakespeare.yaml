@@ -1,0 +1,9 @@
+model: 'configs/models/babyGPT_tiktoken.yaml'
+optimizer: 'configs/optimizers/default_optimizer.yaml'
+dataset: 'configs/datasets/shakespeare_set.yaml'
+
+max_new_tokens: 500
+condition_prompt: "\n"
+temperature: 0.8
+top_k: 200
+seed: 321

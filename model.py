@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch
 from loguru import logger
 import inspect
-import math
 
 
 """
@@ -108,6 +107,7 @@ class MLP(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(cfg.n_embd, 4 * cfg.n_embd, bias=cfg.bias)
         self.act = nn.GELU()
+        # self.act = nn.ReLU()
         self.fc2 = nn.Linear(4 * cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.dropout = nn.Dropout(cfg.dropout)
 
@@ -157,7 +157,7 @@ class GPT(nn.Module):
 
         # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
-        # really better? weight tying, YES!!! or maybe not
+        # really better? weight tying, YES!!!
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")

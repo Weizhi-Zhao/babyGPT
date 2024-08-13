@@ -6,6 +6,8 @@ from typing import Literal
 import os
 import pickle
 import torch
+import tiktoken
+from model import GPT
 
 def recursive_load_config(cfg):
     if isinstance(cfg, DictConfig):
@@ -66,7 +68,9 @@ def generate_one_sequence(model, device, cfg: DictConfig) -> str:
         encode = lambda s: [ctoi[c] for c in s]
         decode = lambda l: ''.join([itoc[i] for i in l])
     else:
-        raise ValueError("meta_path is not specified in the config file")
+        tokenizer = tiktoken.encoding_for_model("gpt-2")
+        encode = lambda s: tokenizer.encode(s)
+        decode = lambda l: tokenizer.decode(l)
     
     cond = encode(cfg.condition_prompt)
     cond = torch.tensor(cond, dtype=torch.long, device=device)[None, ...]
@@ -87,6 +91,39 @@ def save_loss_fig(losses: list[dict[Literal["train", "test"]: float]], cfg: Dict
     ax.legend()
     fig.savefig(os.path.join(cfg.out_dir, 'loss.png'),
                 dpi=300, bbox_inches='tight')
+
+
+def tensor_mem(x: torch.Tensor):
+    return x.element_size() * x.nelement()
+
+
+def save_checkpoint(model, optimizer, iter_num, cfg: DictConfig):
+    checkpoint = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "iter_num": iter_num,
+        "config": cfg
+    }
+    torch.save(checkpoint, os.path.join(cfg.out_dir, 'ckpt.pt'))
+    logger.info(f"save checkpoint to {os.path.join(cfg.out_dir, 'ckpt.pt')}")
+
+
+def resume_checkpoint(ckpt_path: Path, device, inference=False):
+    # let's just map_location = device like karpathy
+    checkpoint = torch.load(ckpt_path, map_location=device,
+                            weights_only=True, mmap=True)
+    cfg = checkpoint["config"]
+    with torch.device("meta"):
+        model = GPT(cfg)
+    model.load_state_dict(checkpoint["model"], assign=True)
+    model = model.to(device=device)
+
+    if inference:
+        return model
+    
+    optimizer = model.configure_optimizer(cfg)
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    return model, optimizer, checkpoint["iter_num"]
 
 
 if __name__ == '__main__':
