@@ -13,7 +13,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 from datasets import DATASETS
 from loguru import logger
 from matplotlib import pyplot as plt
-from model import GPT
+from models import GPT
 from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
 from utils import load_config, generate_one_sequence, save_loss_fig, save_checkpoint

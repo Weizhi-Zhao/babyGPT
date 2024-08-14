@@ -289,3 +289,4 @@ class GPT(nn.Module):
 
             tokens = torch.cat((tokens, next_token), dim=1)
         return tokens
+

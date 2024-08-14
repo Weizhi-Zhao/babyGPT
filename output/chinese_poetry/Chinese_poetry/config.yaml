@@ -16,7 +16,7 @@ bias: false
 eval_interval: 500
 eval_num_samples: 10
 final_eval_samples: 5000
-max_iters: 1
+max_iters: 200000
 batch_size: 64
 learning_rate: 0.001
 beta1: 0.9

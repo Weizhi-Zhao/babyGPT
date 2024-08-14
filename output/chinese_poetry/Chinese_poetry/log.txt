@@ -2,3 +2,6 @@ INFO - GPT parameter number: 15.93M
 DEBUG - parameters don't need grad: []
 INFO - num decayed parameter tensors: 26, with 15,960,576 parameters
 INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
+INFO - Final train loss 3.8394170682641526, test loss 3.814899486831472
+INFO - save checkpoint to output/chinese_poetry/Chinese_poetry/ckpt.pt
+INFO - Training time: 27478.77 seconds

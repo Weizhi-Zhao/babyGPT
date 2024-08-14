@@ -7,7 +7,7 @@ import os
 import pickle
 import torch
 import tiktoken
-from model import GPT
+from models import GPT
 
 def recursive_load_config(cfg):
     if isinstance(cfg, DictConfig):
@@ -111,7 +111,7 @@ def save_checkpoint(model, optimizer, iter_num, cfg: DictConfig):
 def resume_checkpoint(ckpt_path: Path, device, inference=False):
     # let's just map_location = device like karpathy
     checkpoint = torch.load(ckpt_path, map_location=device,
-                            weights_only=True, mmap=True)
+                            weights_only=False, mmap=True)
     cfg = checkpoint["config"]
     with torch.device("meta"):
         model = GPT(cfg)
@@ -119,7 +119,9 @@ def resume_checkpoint(ckpt_path: Path, device, inference=False):
     model = model.to(device=device)
 
     if inference:
-        return model
+        with open(cfg.meta_path, 'rb') as f:
+            meta = pickle.load(f)
+        return model, meta
     
     optimizer = model.configure_optimizer(cfg)
     optimizer.load_state_dict(checkpoint["optimizer"])
