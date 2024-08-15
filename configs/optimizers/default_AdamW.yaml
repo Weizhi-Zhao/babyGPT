@@ -1,0 +1,15 @@
+out_dir: 'output/shakespeare_char'
+eval_interval: 100
+eval_num_samples: 10
+final_eval_samples: 5000
+
+max_iters: 3000
+batch_size: 64
+learning_rate: 1e-3 # with baby networks can afford to go a bit higher
+beta1: 0.9
+beta2: 0.999
+weight_decay: 1e-1
+decay_lr:
+  warmup_iters: 100
+  lr_decay_iters: 3000
+  min_lr: 1e-4

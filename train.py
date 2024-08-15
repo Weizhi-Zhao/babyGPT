@@ -9,7 +9,7 @@
 # TODO: add chinese dataset
 # TODO: KV cache
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 from datasets import DATASETS
 from loguru import logger
 from matplotlib import pyplot as plt
@@ -111,9 +111,9 @@ def train(cfg):
         model = GPT(cfg)
     optimizer = model.configure_optimizer(cfg)
     
-    # logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
-    #             "CUDA memory allocated for model and optimizer")
-    # torch.cuda.reset_peak_memory_stats()
+    logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
+                "CUDA memory allocated for model and optimizer")
+    torch.cuda.reset_peak_memory_stats()
 
     store_losses = []
     model.train()
@@ -148,8 +148,8 @@ def train(cfg):
     with open(os.path.join(cfg.out_dir, 'test_generation.txt'), 'w') as f:
         f.write(test_generation)
 
-    # logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
-    #             "CUDA memory allocated for training")
+    logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
+                "CUDA memory allocated for training")
 
 
 if __name__ == "__main__":
@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
     cfg = load_config(args.config)
 
-    # torch.cuda.reset_peak_memory_stats() # reset memory counter
+    torch.cuda.reset_peak_memory_stats() # reset memory counter
     torch.manual_seed(cfg.seed)
     torch.cuda.manual_seed(cfg.seed)
 
@@ -239,4 +239,14 @@ python train.py --config configs/shakespeare.yaml --name tiktoken --debug --save
 
 15. Chinese poetry dataset
 python train.py --config configs/chinese_poetry.yaml --name Chinese_poetry --debug --save_log
+python train.py --config configs/chinese_poetry.yaml --name cp_rope --debug --save_log
+
+16. RoPE
+python train.py --config configs/sc_rope.yaml --name RoPE --debug --save_log
+python train.py --config configs/sc_rope.yaml --name RoPE_rm1drop --debug --save_log
+python train.py --config configs/sc_rope.yaml --name RoPE_drop03 --debug --save_log
+python train.py --config configs/sc_rope.yaml --name RoPE_drop04 --debug --save_log
+
+17. test dropout
+python train.py --config configs/sc_drop.yaml --name drop03 --debug --save_log
 '''

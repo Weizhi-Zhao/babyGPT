@@ -2,10 +2,10 @@ model: 'configs/models/babyGPT_cp.yaml'
 optimizer: 'configs/optimizers/cp_optim.yaml'
 dataset: 'configs/datasets/chinese_poetry_set.yaml'
 
-max_new_tokens: 200
+max_new_tokens: 500
 condition_prompt: "s"
-temperature: 0.8
-top_k: 100
+temperature: 0.7
+top_k: 50
 seed: 321
 
 out_dir: 'output/chinese_poetry'

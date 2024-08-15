@@ -1,5 +1,5 @@
-model: 'configs/models/babyGPT.yaml'
-optimizer: 'configs/optimizers/default_optimizer.yaml'
+model: 'configs/models/babyGPT_rope.yaml'
+optimizer: 'configs/optimizers/default_AdamW.yaml'
 dataset: 'configs/datasets/shakespeare_char_set.yaml'
 
 max_new_tokens: 500

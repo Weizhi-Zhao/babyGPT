@@ -1,4 +1,0 @@
-dataset_name: shakespeare
-train_set_path: "data/shakespeare/train.pt"
-test_set_path: "data/shakespeare/test.pt"
-vocab_size: 50256

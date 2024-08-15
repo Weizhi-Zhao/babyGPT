@@ -1,0 +1,9 @@
+INFO - GPT parameter number: 10.65M
+DEBUG - parameters don't need grad: []
+INFO - num decayed parameter tensors: 26, with 10,740,096 parameters
+INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
+INFO - 42.49 MB CUDA memory allocated for model and optimizer
+INFO - Final train loss 1.2159783885448794, test loss 1.4978724220131017
+INFO - save checkpoint to output/shakespeare_char/beta0999/ckpt.pt
+INFO - 2817.40 MB CUDA memory allocated for training
+INFO - Training time: 473.48 seconds

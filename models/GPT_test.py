@@ -6,71 +6,82 @@ from loguru import logger
 import inspect
 
 
-class RoPE(nn.Module):
-    # thanks to llama3: https://github.com/meta-llama/llama3/blob/main/llama/model.py
-    def __init__(self, cfg):
-        super().__init__()
-        self.block_size = cfg.block_size
-        assert (
-            cfg.n_embd % cfg.n_head == 0
-        ), "Embedding size must be an integer multiple of the number of heads"
-        self.head_dim = cfg.n_embd // cfg.n_head
-        rope_base = cfg.rope_base
-
-        assert self.head_dim % 2 == 0, "head_dim must be an even number"
-        thetas = 1.0 / (
-            rope_base ** (torch.arange(0, self.head_dim, 2).float() / self.head_dim)
-        )
-        t = torch.arange(self.block_size).float()
-        # precompute m*theta for token dim and position dim
-        freqs = torch.outer(t, thetas) # [block_size, n_embd//2], val = pos*theta
-        # cis: complex number, freq_cis = e^(i*freqs)
-        freqs_cis = torch.polar(abs=torch.ones_like(freqs), angle=freqs)
-        self.register_buffer("freqs_cis", freqs_cis, persistent=False)
-
-    def forward(self, x: torch.Tensor):
-        assert x.size(3) == self.head_dim, "x.size(3) must be equal to head_dim"
-        assert x.size(2) <= self.block_size, "x.size(2) must be less than or equal to block_size"
-        freqs_cis = self.freqs_cis[:x.size(2), :] # [seq_size, head_dim]
-        x = x.reshape(*x.shape[:-1], -1, 2)
-        x = torch.view_as_complex(x)
-        x = x * freqs_cis
-        x = torch.view_as_real(x).flatten(3)
-        return x
+"""
+nn.MultiheadAttention's loss is slightly higher than myAttention
+Does nn.MultiheadAttention inference faster? yes
+how to use Nested Tensor. due to Nested Tensor conflict with attn mask, put it later
+what if use nn.TransformerDecoder and nn.TransformerDecoderLayer? No it contains cross attention
+is DROP out inplace better? no, inplace is slower and worse
+"""
 
 
 class CausalSelfAttention(nn.Module):
+    # masked self attention
     def __init__(self, cfg: DictConfig):
         super().__init__()
         assert cfg.n_embd % cfg.n_head == 0, \
             "Embedding size must be an integer multiple of the number of heads"
 
+        self.c_attn = nn.MultiheadAttention(cfg.n_embd,
+                                            cfg.n_head,
+                                            dropout=cfg.dropout,
+                                            bias=cfg.bias,
+                                            batch_first=True)
+        self.register_buffer("mask", torch.tril(torch.ones(cfg.block_size, cfg.block_size)))
+
+        # cause nn.MultiheadAttention only dropout attention weights
+        self.dropout = nn.Dropout(cfg.dropout) 
+
+    def forward(self, x: torch.Tensor):
+        x, _ = self.c_attn(x, x, x, need_weights=False,
+                           attn_mask=self.mask, is_causal=True)
+        x = self.dropout(x)
+        return x
+
+
+class MyCausalSelfAttention(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        assert cfg.n_embd % cfg.n_head == 0, \
+            "Embedding size must be an integer multiple of the number of heads"
+        
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
 
+        self.attn_drop = nn.Dropout(cfg.dropout)
         self.drop_p = cfg.dropout
-        self.drop = nn.Dropout(cfg.dropout)
+        self.proj_drop = nn.Dropout(cfg.dropout)
+
+        self.n_embd = cfg.n_embd
         self.n_head = cfg.n_head
 
-    def forward(self, x: torch.Tensor, rope: RoPE):
+    def forward(self, x: torch.Tensor):
         B, T, C = x.size()
+        """
+        what is th difference between torch.split, torch.tensor_split and torch.chunk?
+        split and tensor_split split tensor by size
+        chunk split tensor by number
+        list of numbers can be provided into split and tensor_split
+        in split, numbers are exact sizes
+        for tensor_split, numbers are indices
+        there are also some other differences when dim is not divisible by split_size
+
+        nn.Linear only transforms the last dimension
+        """
         q, k, v = self.c_attn(x).chunk(3, dim=-1)
         # transpose B and n_head together, for batched multi-head matrix multiplication
         # (B, n_head, T, head_dim)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        q = rope(q)
-        k = rope(k) 
 
         y = F.scaled_dot_product_attention(
             q, k, v, dropout_p=self.drop_p if self.training else 0, is_causal=True
         )
-
+        
         y = y.transpose(1, 2).view(B, T, C)
-        # y = y.transpose(1, 2).contiguous().view(B, T, C)
 
-        return self.drop(self.proj(y))
+        return self.proj_drop(self.proj(y))
 
 
 class MLP(nn.Module):
@@ -78,12 +89,14 @@ class MLP(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(cfg.n_embd, 4 * cfg.n_embd, bias=cfg.bias)
         self.act = nn.GELU()
+        # self.act = nn.ReLU()
         self.fc2 = nn.Linear(4 * cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.dropout = nn.Dropout(cfg.dropout)
 
         self._reset_parameters()
 
     def _reset_parameters(self):
+        # nn.init.kaiming_uniform_(self.fc1.weight)
         nn.init.xavier_uniform_(self.fc2.weight)
 
     def forward(self, x):
@@ -92,21 +105,22 @@ class MLP(nn.Module):
         x = self.fc2(x)
         x = self.dropout(x)
         return x
-
+    
 
 class Block(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.ln1 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
+        # self.attn = MyCausalSelfAttention(cfg)
         self.attn = CausalSelfAttention(cfg)
         self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
-    def forward(self, x, rope: RoPE):
-        x = x + self.attn(self.ln1(x), rope)
+    def forward(self, x):
+        x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
-
+    
 
 class GPT(nn.Module):
     def __init__(self, cfg):
@@ -115,10 +129,9 @@ class GPT(nn.Module):
         assert cfg.block_size is not None
         self.cfg = cfg
 
-        self.rope = RoPE(cfg)
-
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
+            wpe = nn.Embedding(cfg.block_size, cfg.n_embd),
             drop = nn.Dropout(cfg.dropout), # drop token+position
             blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)]),
             ln = nn.LayerNorm(cfg.n_embd, bias=cfg.bias), # final layer norm
@@ -126,7 +139,8 @@ class GPT(nn.Module):
 
         # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight
+        # really better? weight tying, YES!!!
+        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
 
@@ -135,26 +149,42 @@ class GPT(nn.Module):
     def _reset_parameters(self):
         nn.init.xavier_uniform_(self.lm_head.weight)
 
-    def get_num_params(self):
+    def get_num_params(self, non_embedding=True):
+        """
+        Return the number of parameters in the model.
+        For non-embedding count (default), the position embeddings get subtracted.
+        The token embeddings would too, except due to the parameter sharing these
+        params are actually used as weights in the final layer, so we include them.
+        """
         n_params = sum(p.numel() for p in self.parameters())
+        if non_embedding:
+            n_params -= self.transformer.wpe.weight.numel()
         return n_params
     
     def forward(self, tokens, targets=None):
+        device = tokens.device
         B, T = tokens.size()
         assert T <= self.cfg.block_size, \
             f"Cannot forward sequence of length {T}, block size is only {self.cfg.block_size}"
+        pos = torch.arange(0, T, dtype=torch.int64, device=device)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(tokens)
-        # tested, useful
-        x = self.transformer.drop(tok_emb)
+        pos_emb = self.transformer.wpe(pos)
+        x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.blocks:
-            x = block(x, self.rope)
+            x = block(x)
         x = self.transformer.ln(x)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
+            """
+            input: (B, T, vocab_size) -> (B * T, vocab_size)
+            target: (B, T) -> (B * T)
+            ignore_index: some sentence does not fill the length of block_size
+            so maybe they are padded with -1
+            """
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
             return logits, loss
@@ -184,6 +214,10 @@ class GPT(nn.Module):
             {"params": decay_params, "weight_decay": weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
+        # optim_groups = [
+        #     {"params": decay_params, "weight_decay": weight_decay},
+        #     {"params": nodecay_params, "weight_decay": weight_decay},
+        # ]
 
 
         num_decay_params = sum(p.numel() for p in decay_params)
@@ -237,3 +271,4 @@ class GPT(nn.Module):
 
             tokens = torch.cat((tokens, next_token), dim=1)
         return tokens
+

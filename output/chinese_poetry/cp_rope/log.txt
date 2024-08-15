@@ -1,0 +1,5 @@
+INFO - GPT parameter number: 15.93M
+DEBUG - parameters don't need grad: []
+INFO - num decayed parameter tensors: 25, with 15,929,856 parameters
+INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
+INFO - 60.82 MB CUDA memory allocated for model and optimizer

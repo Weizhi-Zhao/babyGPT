@@ -58,7 +58,7 @@ def inference(ckpt: Path, device):
         generator = stream_generator(
             model,
             device,
-            prompt,
+            prompt + '\n',
             encode,
             decode,
             max_new_tokens=500,
@@ -68,7 +68,7 @@ def inference(ckpt: Path, device):
             end="e",
         )
 
-        print('\n' + prompt, end="", flush=True)
+        print('\n' + prompt + '\n', end="", flush=True)
         for char in generator:
             print(char, end="", flush=True)
             # time.sleep(0.1)
