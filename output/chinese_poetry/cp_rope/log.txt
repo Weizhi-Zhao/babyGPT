@@ -3,3 +3,7 @@ DEBUG - parameters don't need grad: []
 INFO - num decayed parameter tensors: 25, with 15,929,856 parameters
 INFO - num non-decayed parameter tensors: 13, with 4,992 parameters
 INFO - 60.82 MB CUDA memory allocated for model and optimizer
+INFO - Final train loss 3.853474507665938, test loss 3.8353802383325664
+INFO - save checkpoint to output/chinese_poetry/cp_rope/ckpt.pt
+INFO - 3820.51 MB CUDA memory allocated for training
+INFO - Training time: 58720.53 seconds

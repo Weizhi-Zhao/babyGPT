@@ -6,37 +6,25 @@ from loguru import logger
 import inspect
 
 
-class RoPE(nn.Module):
+def precompute_freqs_cis(dim: int, seq_len: int, rope_base=10000.0):
+    assert(dim % 2 == 0), "dim must be an even number"
+    thetas = rope_base ** (-torch.arange(0, dim, 2).float() / dim)
+    t = torch.arange(seq_len).float()
+    freqs = torch.outer(t, thetas)
+    freqs_cis = torch.polar(abs=torch.ones_like(freqs), angle=freqs)
+    return freqs_cis
+
+
+def apply_RoPE(x: torch.Tensor, freqs_cis: torch.Tensor):
     # thanks to llama3: https://github.com/meta-llama/llama3/blob/main/llama/model.py
-    def __init__(self, cfg):
-        super().__init__()
-        self.block_size = cfg.block_size
-        assert (
-            cfg.n_embd % cfg.n_head == 0
-        ), "Embedding size must be an integer multiple of the number of heads"
-        self.head_dim = cfg.n_embd // cfg.n_head
-        rope_base = cfg.rope_base
-
-        assert self.head_dim % 2 == 0, "head_dim must be an even number"
-        thetas = 1.0 / (
-            rope_base ** (torch.arange(0, self.head_dim, 2).float() / self.head_dim)
-        )
-        t = torch.arange(self.block_size).float()
-        # precompute m*theta for token dim and position dim
-        freqs = torch.outer(t, thetas) # [block_size, n_embd//2], val = pos*theta
-        # cis: complex number, freq_cis = e^(i*freqs)
-        freqs_cis = torch.polar(abs=torch.ones_like(freqs), angle=freqs)
-        self.register_buffer("freqs_cis", freqs_cis, persistent=False)
-
-    def forward(self, x: torch.Tensor):
-        assert x.size(3) == self.head_dim, "x.size(3) must be equal to head_dim"
-        assert x.size(2) <= self.block_size, "x.size(2) must be less than or equal to block_size"
-        freqs_cis = self.freqs_cis[:x.size(2), :] # [seq_size, head_dim]
-        x = x.reshape(*x.shape[:-1], -1, 2)
-        x = torch.view_as_complex(x)
-        x = x * freqs_cis
-        x = torch.view_as_real(x).flatten(3)
-        return x
+    assert x.ndim == 4, "x must be a 4D tensor"
+    assert x.size(3) // 2 == freqs_cis.size(1), "x.size(3) must be equal to freqs_cis.size(1)"
+    assert x.size(2) == freqs_cis.size(0), "x.size(2) must be equal to freqs_cis.size(0)"
+    x = x.reshape(*x.shape[:-1], -1, 2)
+    x = torch.view_as_complex(x)
+    x = x * freqs_cis
+    x = torch.view_as_real(x).flatten(3)
+    return x
 
 
 class CausalSelfAttention(nn.Module):
@@ -52,7 +40,7 @@ class CausalSelfAttention(nn.Module):
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
 
-    def forward(self, x: torch.Tensor, rope: RoPE):
+    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor):
         B, T, C = x.size()
         q, k, v = self.c_attn(x).chunk(3, dim=-1)
         # transpose B and n_head together, for batched multi-head matrix multiplication
@@ -60,15 +48,14 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        q = rope(q)
-        k = rope(k) 
+        q = apply_RoPE(q, freqs_cis)
+        k = apply_RoPE(k, freqs_cis)
 
         y = F.scaled_dot_product_attention(
             q, k, v, dropout_p=self.drop_p if self.training else 0, is_causal=True
         )
 
         y = y.transpose(1, 2).view(B, T, C)
-        # y = y.transpose(1, 2).contiguous().view(B, T, C)
 
         return self.drop(self.proj(y))
 
@@ -102,8 +89,8 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
-    def forward(self, x, rope: RoPE):
-        x = x + self.attn(self.ln1(x), rope)
+    def forward(self, x, freqs_cis: torch.Tensor):
+        x = x + self.attn(self.ln1(x), freqs_cis)
         x = x + self.mlp(self.ln2(x))
         return x
 
@@ -115,7 +102,13 @@ class GPT(nn.Module):
         assert cfg.block_size is not None
         self.cfg = cfg
 
-        self.rope = RoPE(cfg)
+        freqs_cis = precompute_freqs_cis(
+            dim=cfg.n_embd // cfg.n_head,
+            seq_len=cfg.block_size,
+            rope_base=cfg.rope_base,
+        )
+
+        self.register_buffer("freqs_cis", freqs_cis)
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
@@ -138,7 +131,7 @@ class GPT(nn.Module):
     def get_num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
-    
+
     def forward(self, tokens, targets=None):
         B, T = tokens.size()
         assert T <= self.cfg.block_size, \
@@ -149,7 +142,7 @@ class GPT(nn.Module):
         # tested, useful
         x = self.transformer.drop(tok_emb)
         for block in self.transformer.blocks:
-            x = block(x, self.rope)
+            x = block(x, self.freqs_cis[:T, :])
         x = self.transformer.ln(x)
 
         if targets is not None:
@@ -162,7 +155,7 @@ class GPT(nn.Module):
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             return logits
-    
+
     def configure_optimizer(self, cfg):
         weight_decay = cfg.weight_decay
         learning_rate = cfg.learning_rate
@@ -174,7 +167,7 @@ class GPT(nn.Module):
         logger.debug(
             f"parameters don't need grad: "
             f"{[pn for pn, p in self.named_parameters() if not p.requires_grad]}")
-        
+
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
         # it is a little worse
@@ -185,7 +178,6 @@ class GPT(nn.Module):
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
 
-
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
         logger.info(
@@ -195,22 +187,9 @@ class GPT(nn.Module):
             f"num non-decayed parameter tensors: "
             f"{len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
-        """
-        fused: https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
-        If the user specifies True for both foreach and fused, 
-        we will prioritize fused over foreach, as it is typically faster.
-        HOWEVER, since the fused implementation is relatively new, we want to 
-        give it sufficient bake-in time, so we default to foreach and NOT fused 
-        when the user has not specified either flag.
-        """
-        use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        # it seems that fused supports cpu
-        extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
-
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, fused=True)
         return optimizer
-    
+
     @torch.no_grad
     def generate(self, tokens, max_new_tokens, temperature=1.0, topk=None):
         """
