@@ -9,7 +9,7 @@
 # TODO: add chinese dataset
 # TODO: KV cache
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 from datasets import DATASETS
 from loguru import logger
 from matplotlib import pyplot as plt
@@ -249,4 +249,7 @@ python train.py --config configs/sc_rope.yaml --name RoPE_drop04 --debug --save_
 
 17. test dropout
 python train.py --config configs/sc_drop.yaml --name drop03 --debug --save_log
+
+18. test silu
+python train.py --config configs/shakespeare_char.yaml --name silu --debug --save_log
 '''

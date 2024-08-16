@@ -81,7 +81,8 @@ def save_loss_fig(losses: list[dict[Literal["train", "test"]: float]], cfg: Dict
     fig, ax = plt.subplots()
 
     ax.plot([l['train'] for l in losses], 'b', label='Train Loss')
-    ax.plot([l['test'] for l in losses], 'r', label='Test Loss')
+    if 'test' in losses[0]:
+        ax.plot([l['test'] for l in losses], 'r', label='Test Loss')
 
     ax.set_xlabel(
         f"{cfg.eval_num_samples} samples every {cfg.eval_interval} iterations")

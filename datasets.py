@@ -2,10 +2,15 @@
 # detect the memory leak? there is no leak
 # will torch mmap leak? no and torch is much faster
 
-import torch
-from torch.utils.data import Dataset
-import pickle
+from PIL import Image
 from pathlib import Path
+from tokenizer import Tokenizer
+from torch.utils.data import Dataset
+from torchvision import transforms
+import pickle
+import random
+import torch
+import yaml
 
 
 class ShakespeareCharDataset(Dataset):
@@ -64,8 +69,57 @@ class ChinesePoetryDataset(Dataset):
         return x, y
 
 
+class ImageCaptionDataset(Dataset):
+    """
+    data: list[dict[img_path, caption]]
+    the caption must has at least 1 tokens
+    """
+    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer):
+        self.data_path = data_path
+        # self.data = torch.load(self.data_path, mmap=True)
+        with open(self.data_path / 'data.yaml', 'r', encoding='utf-8') as f:
+            self.data = yaml.safe_load(f)
+        self.block_size = block_size
+        self.tokenizer = tokenizer
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize(224, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(224),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img_path = self.data_path / self.data[index]['img']
+        img = Image.open(img_path).convert('RGB')
+        img = self.transform(img)
+        caption = self.data[index]['caption']
+        tokens = self.tokenizer.encode(caption)
+        tokens_len = len(tokens)
+        # [0, 1, 2, 3, 4, 5]
+        x_start = random.randint(0, tokens_len - 2)
+        y_end = min(x_start + self.block_size, tokens_len)
+        if y_end - x_start - 1 < self.block_size:
+            x_pad = torch.ones(self.block_size - (y_end - 1 - x_start), dtype=torch.long)
+            y_pad = -torch.ones(self.block_size - (y_end - 1 - x_start), dtype=torch.long)
+            x = torch.cat((torch.tensor(tokens[x_start:y_end-1], dtype=torch.long), x_pad))
+            y = torch.cat((torch.tensor(tokens[x_start+1:y_end], dtype=torch.long), y_pad))
+        elif y_end - x_start - 1 == self.block_size:
+            x = torch.tensor(tokens[x_start:y_end-1], dtype=torch.long)
+            y = torch.tensor(tokens[x_start+1:y_end], dtype=torch.long)
+        else:
+            raise ValueError("end - start > self.block_size")
+        assert x.size(0) == self.block_size, f"x.size(0) = {x.size(0)}, self.block_size = {self.block_size}"
+        assert y.size(0) == self.block_size, f"y.size(0) = {y.size(0)}, self.block_size = {self.block_size}"
+        return img, x, y
+
+
+
 DATASETS = {
     "shakespeare_char": ShakespeareCharDataset,
     "shakespeare": ShakespeareDataset,
     "chinese_poetry": ChinesePoetryDataset,
+    "image_caption": ImageCaptionDataset
 }

@@ -3,7 +3,6 @@ from torch.nn import functional as F
 import torch.nn as nn
 import torch
 from loguru import logger
-import inspect
 
 
 def precompute_freqs_cis(dim: int, seq_len: int, rope_base=10000.0):
@@ -39,6 +38,14 @@ class CausalSelfAttention(nn.Module):
         self.drop_p = cfg.dropout
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(
+            self.c_attn.weight[: self.c_attn.weight.size(0) // 3, :]
+        )
+        nn.init.xavier_uniform_(self.proj.weight)
 
     def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor):
         B, T, C = x.size()
