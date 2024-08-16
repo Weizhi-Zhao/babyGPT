@@ -6,7 +6,6 @@ from typing import Literal
 import os
 import pickle
 import torch
-import tiktoken
 from models import GPT
 
 def recursive_load_config(cfg):
