@@ -6,64 +6,41 @@ from loguru import logger
 from .resnet import ResNet18
 
 
-def precompute_freqs_cis(dim: int, seq_len: int, rope_base=10000.0):
-    assert(dim % 2 == 0), "dim must be an even number"
-    thetas = rope_base ** (-torch.arange(0, dim, 2).float() / dim)
-    t = torch.arange(seq_len).float()
-    freqs = torch.outer(t, thetas)
-    freqs_cis = torch.polar(abs=torch.ones_like(freqs), angle=freqs)
-    return freqs_cis
-
-
-def apply_RoPE(x: torch.Tensor, freqs_cis: torch.Tensor):
-    # thanks to llama3: https://github.com/meta-llama/llama3/blob/main/llama/model.py
-    assert x.ndim == 4, "x must be a 4D tensor"
-    assert x.size(3) // 2 == freqs_cis.size(1), "x.size(3) must be equal to freqs_cis.size(1)"
-    assert x.size(2) == freqs_cis.size(0), "x.size(2) must be equal to freqs_cis.size(0)"
-    x = x.reshape(*x.shape[:-1], -1, 2)
-    x = torch.view_as_complex(x)
-    x = x * freqs_cis
-    x = torch.view_as_real(x).flatten(3)
-    return x
-
-
 class CausalSelfAttention(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         assert cfg.n_embd % cfg.n_head == 0, \
             "Embedding size must be an integer multiple of the number of heads"
 
-        self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
+        self.c_attn = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
 
-        self.drop_p = cfg.dropout
+        self.attn_drop = nn.Dropout(cfg.dropout)
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
+
+        attn_mask = torch.tril(torch.ones((cfg.block_size, cfg.block_size)))
+        attn_mask = attn_mask / torch.sum(attn_mask, dim=1, keepdim=True)
+        attn_mask = attn_mask.expand(cfg.batch_size, cfg.n_head, -1, -1)
+        self.register_buffer("attn_mask", attn_mask)
+        # check attn_mask for no attention
+        breakpoint()
 
         self._reset_parameters()
 
     def _reset_parameters(self):
-        nn.init.xavier_uniform_(
-            self.c_attn.weight[: self.c_attn.weight.size(0) // 3, :]
-        )
+        nn.init.xavier_uniform_(self.c_attn.weight)
         nn.init.xavier_uniform_(self.proj.weight)
 
-    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         B, T, C = x.size()
-        q, k, v = self.c_attn(x).chunk(3, dim=-1)
-        # transpose B and n_head together, for batched multi-head matrix multiplication
-        # (B, n_head, T, head_dim)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = self.c_attn(x)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        q = apply_RoPE(q, freqs_cis)
-        k = apply_RoPE(k, freqs_cis)
+        attn_mask = self.attn_drop(self.attn_mask[..., :T, :T])
+        y = attn_mask @ v
 
-        y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.drop_p if self.training else 0, is_causal=True
-        )
-
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        # y = y.transpose(1, 2).contiguous().view(B, T, C)
+        y = y.transpose(1, 2).view(B, T, C)
 
         return self.drop(self.proj(y))
 
@@ -74,35 +51,36 @@ class CrossAttention(nn.Module):
         assert cfg.n_embd % cfg.n_head == 0, \
             "Embedding size must be an integer multiple of the number of heads"
 
-        self.wq = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
-        self.wkv = nn.Linear(cfg.n_embd, 2 * cfg.n_embd, bias=cfg.bias)
+        self.wv = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
 
         self.drop_p = cfg.dropout
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
 
+        attn_mask = torch.ones((cfg.block_size, 49)) / 49
+        attn_mask = attn_mask.expand(cfg.batch_size, cfg.n_head, -1, -1)
+        self.register_buffer("attn_mask", attn_mask)
+        # check attn_mask for no attention
+        breakpoint()
+
         self._reset_parameters()
 
     def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.wq.weight)
         nn.init.xavier_uniform_(self.proj.weight)
 
     def forward(self, x: torch.Tensor, mem: torch.Tensor):
         assert x.size(-1) == mem.size(-1), "x and mem must have the same embedding size"
         B, T, C = x.size()
         T_MEM = mem.size(1)
-        q = self.wq(x)
-        k, v = self.wkv(mem).chunk(2, dim=-1)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T_MEM, self.n_head, C // self.n_head).transpose(1, 2)
+        v: torch.Tensor = self.wv(mem)
         v = v.view(B, T_MEM, self.n_head, C // self.n_head).transpose(1, 2)
 
-        y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.drop_p if self.training else 0
-        )
-
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        attn_mask = self.attn_mask[..., :T, :]
+        y = attn_mask @ v
+        # check y for no attention
+        breakpoint()
+        y = y.transpose(1, 2).view(B, T, C)
         return self.proj(self.drop(y))
 
 
@@ -150,14 +128,6 @@ class GPTV(nn.Module):
         assert cfg.vocab_size is not None
         assert cfg.block_size is not None
         self.cfg = cfg
-
-        freqs_cis = precompute_freqs_cis(
-            dim=cfg.n_embd // cfg.n_head,
-            seq_len=cfg.block_size,
-            rope_base=cfg.rope_base,
-        )
-
-        self.register_buffer("freqs_cis", freqs_cis)
 
         self.language_model = nn.ModuleDict(dict(
             wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
