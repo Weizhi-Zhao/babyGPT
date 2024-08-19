@@ -3,7 +3,7 @@ optimizer: 'configs/optimizers/GPTV_optim.yaml'
 dataset: 'configs/datasets/image_caption_set.yaml'
 
 max_new_tokens: 1024
-# condition_prompt: "\n"
+condition_prompt: "<s>"
 temperature: 0.7
 top_k: 50
 seed: 321

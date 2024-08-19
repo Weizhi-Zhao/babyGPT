@@ -10,3 +10,4 @@ data.txt
 data/chinese_poetry/data
 data/chinese_poetry/data2
 /output
+data/image_caption/nlp_train.yaml

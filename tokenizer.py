@@ -15,18 +15,11 @@ class Tokenizer:
             meta: dict = pickle.load(f)
         self.ctoi = meta['ctoi']
         self.itoc = meta['itoc']
-        # assert meta.get('special_tokens') is not None, "special_tokens must be in meta.pkl"
-        # self.special_tokens: dict = meta['special_tokens']
-
         # thanks to llama3, add Chinese and <s> </s>
-        pat_str = r"<s>|</s>|[\p{Han}]|[\u3002|\uff1f|\uff01|\uff0c|\u3001|\uff1b|\uff1a|" \
-              + r"\u201c|\u201d|\u2018|\u2019|\uff08|\uff09|\u300a|\u300b|\u3008|\u3009|" \
-              + r"\u3010|\u3011|\u300e|\u300f|\u300c|\u300d|\ufe43|\ufe44|\u3014|\u3015|" \
-              + r"\u2026|\u2014|\uff5e|\ufe4f|\uffe5]" \
-              + r"|(?i:'s|'t|'re|'ve|'m|'ll|'d)" \
-              + r"|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1}" \
-              + r"| ?[^\s\p{L}\p{N}\p{Han}</s><s>]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+        pat_str = meta['pat_str']
         self.pattern = regex.compile(pat_str)
+
+        self._vocab_size = meta['vocab_size']
 
         self._start_token = self.ctoi['<s>']
         self._end_token = self.ctoi['</s>']
@@ -47,6 +40,10 @@ class Tokenizer:
     @property
     def end_token(self) -> int:
         return self._end_token
+    
+    @property
+    def vocab_size(self) -> int:
+        return self._vocab_size
 
 if __name__ == '__main__':
     tokenizer = Tokenizer(Path('data/image_caption/meta.pkl'))
