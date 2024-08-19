@@ -247,7 +247,7 @@ class GPTV(nn.Module):
         return optimizer
 
     @torch.no_grad
-    def generate(self, tokens, max_new_tokens, temperature=1.0, topk=None):
+    def generate(self, image, tokens, max_new_tokens, temperature=1.0, topk=None):
         """
         tokens: (B, T), dtype=torch.int64
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
@@ -259,7 +259,7 @@ class GPTV(nn.Module):
             else:
                 tokens_cond = tokens
 
-            logits = self(tokens_cond)
+            logits = self(image, tokens_cond)
             logits = logits[:, -1, :] / temperature
             if topk is not None:
                 v, _ = torch.topk(logits, k=min(topk, logits.size(-1)))

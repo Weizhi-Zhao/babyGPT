@@ -1,9 +1,8 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 from datasets import ImageCaptionDataset
 from tokenizer import Tokenizer
 from loguru import logger
-from matplotlib import pyplot as plt
 from models import GPTV
 from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
@@ -86,14 +85,11 @@ def train(cfg):
         train_set, replacement=True, num_samples=cfg.max_iters * cfg.batch_size
     )
     train_loader = DataLoader(train_set, batch_size=cfg.batch_size, sampler=sampler)
+
     with torch.device(device):
         model = GPTV(cfg)
     
     optimizer = model.configure_optimizer(cfg)
-
-    # logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
-    #             "CUDA memory allocated for model and optimizer")
-    # torch.cuda.reset_peak_memory_stats()
 
     store_losses = []
     model.train()
@@ -122,13 +118,6 @@ def train(cfg):
 
     # save config yaml
     OmegaConf.save(cfg, os.path.join(cfg.out_dir, 'config.yaml'))
-
-    # test_generation = generate_one_sequence(model, device, cfg)
-    # with open(os.path.join(cfg.out_dir, 'test_generation.txt'), 'w') as f:
-    #     f.write(test_generation)
-
-    # logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
-    #             "CUDA memory allocated for training")
     
     save_loss_fig(store_losses, cfg)
 
