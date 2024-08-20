@@ -1,0 +1,16 @@
+flash-attn
+huggingface-hub
+Jinja2
+loguru
+matplotlib
+nltk
+numpy
+omegaconf
+opencv-python
+pillow
+PyYAML
+regex
+torch
+torchvision
+tqdm
+transformers

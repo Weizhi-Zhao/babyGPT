@@ -66,10 +66,6 @@ def generate_one_sequence(model, device, cfg: DictConfig) -> str:
         itoc = meta['itoc']
         encode = lambda s: [ctoi[c] for c in s]
         decode = lambda l: ''.join([itoc[i] for i in l])
-    else:
-        tokenizer = tiktoken.encoding_for_model("gpt-2")
-        encode = lambda s: tokenizer.encode(s)
-        decode = lambda l: tokenizer.decode(l)
     
     cond = encode(cfg.condition_prompt)
     cond = torch.tensor(cond, dtype=torch.long, device=device)[None, ...]
@@ -83,6 +79,8 @@ def save_loss_fig(losses: list[dict[Literal["train", "test"]: float]], cfg: Dict
     ax.plot([l['train'] for l in losses], 'b', label='Train Loss')
     if 'test' in losses[0]:
         ax.plot([l['test'] for l in losses], 'r', label='Test Loss')
+    if 'val' in losses[0]:
+        ax.plot([l['val'] for l in losses], 'r', label='val Loss')
 
     ax.set_xlabel(
         f"{cfg.eval_num_samples} samples every {cfg.eval_interval} iterations")

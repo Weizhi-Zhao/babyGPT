@@ -15,3 +15,10 @@ data/image_caption/nlp_train.yaml
 /data/image_caption/Val
 /data/image_caption/nlp_dataset
 /data/image_caption/data.yaml
+checkpoints
+data/image_caption/nlp_val.yaml
+data/image_caption/train_data.json
+data/image_caption/val_data.json
+data/image_caption/meta.pkl
+data/image_caption/pretrain/part-000001-28feace1.jsonl
+data/image_caption/pretrain/part-000001-28feace1.jsonl.tar.gz

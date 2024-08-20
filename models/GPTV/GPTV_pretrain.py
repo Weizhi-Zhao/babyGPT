@@ -67,7 +67,7 @@ class CausalSelfAttention(nn.Module):
 
         return self.drop(self.proj(y))
 
-
+"""
 class CrossAttention(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -104,7 +104,7 @@ class CrossAttention(nn.Module):
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.proj(self.drop(y))
-
+"""
 
 class MLP(nn.Module):
     def __init__(self, cfg):
@@ -132,19 +132,19 @@ class Block(nn.Module):
         super().__init__()
         self.ln1 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.self_attn = CausalSelfAttention(cfg)
-        self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.cross_attn = CrossAttention(cfg)
+        # self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
+        # self.cross_attn = CrossAttention(cfg)
         self.ln3 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
-    def forward(self, x, mem, freqs_cis: torch.Tensor):
+    def forward(self, x, freqs_cis: torch.Tensor):
         x = x + self.self_attn(self.ln1(x), freqs_cis)
-        x = x + self.cross_attn(self.ln2(x), mem)
+        # x = x + self.cross_attn(self.ln2(x), mem)
         x = x + self.mlp(self.ln3(x))
         return x
 
 
-class GPTV(nn.Module):
+class GPTVPretrain(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         assert cfg.vocab_size is not None
@@ -161,23 +161,19 @@ class GPTV(nn.Module):
 
         self.language_model = nn.ModuleDict(dict(
             wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
-            drop = nn.Dropout(cfg.dropout), # drop token+position
+            drop = nn.Dropout(cfg.dropout), # drop token
             blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)]),
             ln = nn.LayerNorm(cfg.n_embd, bias=cfg.bias), # final layer norm
         ))
 
-        self.vision_model = ResNet18(self.cfg.n_embd)
+        # self.vision_model = ResNet18(self.cfg.n_embd)
+
+        # if cfg.pretrain:
+        #     self.vision_model.init_from_pretrain()
 
         # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.language_model.wte.weight = self.lm_head.weight
-
-        if cfg.pretrain:
-            self.vision_model.init_from_pretrain()
-            self.load_state_dict(
-                torch.load(cfg.LM_pretrain_ckpt, mmap=True)["model"],
-                strict=False,
-            )
 
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
 
@@ -190,19 +186,19 @@ class GPTV(nn.Module):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
 
-    def forward(self, image, tokens, targets=None):
+    def forward(self, tokens, targets=None):
         B, T = tokens.size()
 
         assert T <= self.cfg.block_size, \
             f"Cannot forward sequence of length {T}, block size is only {self.cfg.block_size}"
 
-        img_mem = self.vision_model(image)
+        # img_mem = self.vision_model(image)
         # forward the GPT model itself
         tok_emb = self.language_model.wte(tokens)
         # tested, useful
         x = self.language_model.drop(tok_emb)
         for block in self.language_model.blocks:
-            x = block(x, img_mem, self.freqs_cis[:T, :])
+            x = block(x, self.freqs_cis[:T, :])
         x = self.language_model.ln(x)
 
         if targets is not None:
@@ -251,7 +247,7 @@ class GPTV(nn.Module):
         return optimizer
 
     @torch.no_grad
-    def generate(self, image, tokens, max_new_tokens, temperature=1.0, topk=None):
+    def generate(self, tokens, max_new_tokens, temperature=1.0, topk=None):
         """
         tokens: (B, T), dtype=torch.int64
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
@@ -263,7 +259,7 @@ class GPTV(nn.Module):
             else:
                 tokens_cond = tokens
 
-            logits = self(image, tokens_cond)
+            logits = self(tokens_cond)
             logits = logits[:, -1, :] / temperature
             if topk is not None:
                 v, _ = torch.topk(logits, k=min(topk, logits.size(-1)))
