@@ -74,12 +74,14 @@ class ImageCaptionDataset(Dataset):
     data: list[dict[img_path, caption]]
     the caption must has at least 1 tokens
     """
-    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer):
+    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer, img_in_sa=False):
         self.data_path = data_path
         # self.data = torch.load(self.data_path, mmap=True)
         with open(self.data_path, 'r', encoding='utf-8') as f:
             self.data = json.load(f)
         self.block_size = block_size
+        if img_in_sa:
+            self.block_size -= 49
         self.tokenizer = tokenizer
         self.transform = transforms.Compose([
             transforms.ToTensor(),

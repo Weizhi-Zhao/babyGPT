@@ -1,12 +1,12 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 from datasets import ImageCaptionDataset
 from tokenizer import Tokenizer
 from loguru import logger
 from models import GPTV
 from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
-from utils import load_config, generate_one_sequence, save_loss_fig, save_checkpoint
+from utils import load_config, save_loss_fig, save_checkpoint
 import argparse
 import math
 import sys
@@ -31,13 +31,21 @@ def estimate_loss(model, train_set, val_set, cfg, eval_num_samples=None):
     eval_train_sampler = RandomSampler(
         train_set, replacement=False, num_samples=eval_num_samples)
     eval_train_loader = DataLoader(
-        train_set, batch_size=cfg.batch_size, sampler=eval_train_sampler)
-    
+        train_set,
+        batch_size=cfg.batch_size,
+        sampler=eval_train_sampler,
+        # num_workers=cfg.num_workers,
+    )
+
     eval_val_sampler = RandomSampler(
         val_set, replacement=True, num_samples=eval_num_samples)
     eval_val_loader = DataLoader(
-        val_set, batch_size=cfg.batch_size, sampler=eval_val_sampler)
-    
+        val_set,
+        batch_size=cfg.batch_size,
+        sampler=eval_val_sampler,
+        # num_workers=cfg.num_workers,
+    )
+
     losses = []
     for img, x, y in eval_train_loader:
         img = img.to(device)
@@ -92,11 +100,16 @@ def train(cfg):
     train_sampler = RandomSampler(
         train_set, replacement=True, num_samples=cfg.max_iters * cfg.batch_size
     )
-    train_loader = DataLoader(train_set, batch_size=cfg.batch_size, sampler=train_sampler)
+    train_loader = DataLoader(
+        train_set,
+        batch_size=cfg.batch_size,
+        sampler=train_sampler,
+        num_workers=cfg.num_workers,
+    )
 
     with torch.device(device):
         model = GPTV(cfg)
-    
+
     optimizer = model.configure_optimizer(cfg)
 
     store_losses = []
@@ -127,7 +140,7 @@ def train(cfg):
 
     # save config yaml
     OmegaConf.save(cfg, os.path.join(cfg.out_dir, 'config.yaml'))
-    
+
     save_loss_fig(store_losses, cfg)
 
 
@@ -169,4 +182,11 @@ if __name__ == "__main__":
 
 '''
 python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b120 --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b10 --save_log
+
+image in self-attention
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name test --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa_hwd --save_log
 '''

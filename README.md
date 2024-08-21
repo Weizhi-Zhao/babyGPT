@@ -35,19 +35,19 @@ python prepare.py
 
 1. 预训练语言模型。
 ```bash
-python python GPTV_pretrain.py --config configs/GPTV_pretrain.yaml --name GPTV_pretrain --save_log
+python GPTV_pretrain.py --config configs/GPTV_pretrain.yaml --name GPTV_pretrain --save_log
 ```
 
 2. 训练视觉-语言多模态模型。
 ```bash
-python python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
 ```
 
 ### 测试
 
 1. 生成测试集的图片描述。
 ```bash
-python ???
+python infer_GPTV.py --ckpt checkpoints/ckpt.pt --img data/image_caption/Val
 ```
 
 2. 为图片描述打分。
