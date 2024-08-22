@@ -1,8 +1,10 @@
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import DictConfig
 from torch.nn import functional as F
 import torch.nn as nn
 import torch
 from loguru import logger
+from torch import Tensor
+from typing import Optional
 
 
 def precompute_freqs_cis(dim: int, seq_len: int, rope_base=10000.0):
@@ -39,6 +41,8 @@ class CausalSelfAttention(nn.Module):
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
 
+        self.kv_cache = None
+
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -47,7 +51,7 @@ class CausalSelfAttention(nn.Module):
         )
         nn.init.xavier_uniform_(self.proj.weight)
 
-    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor):
+    def forward(self, x: Tensor, freqs_cis: Tensor, input_pos: Optional[Tensor]):
         B, T, C = x.size()
         q, k, v = self.c_attn(x).chunk(3, dim=-1)
         # transpose B and n_head together, for batched multi-head matrix multiplication
@@ -55,8 +59,13 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        
         q = apply_RoPE(q, freqs_cis)
         k = apply_RoPE(k, freqs_cis)
+
+        if self.kv_cache is not None:
+            assert input_pos is not None, "input_pos must be provided for KV cache"
+            k, v = self.kv_cache.update(input_pos, k, v)
 
         y = F.scaled_dot_product_attention(
             q, k, v, dropout_p=self.drop_p if self.training else 0, is_causal=True
@@ -96,10 +105,28 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
-    def forward(self, x, freqs_cis: torch.Tensor):
-        x = x + self.attn(self.ln1(x), freqs_cis)
+    def forward(self, x, freqs_cis: Tensor, input_pos: Optional[Tensor]):
+        x = x + self.attn(self.ln1(x), freqs_cis, input_pos)
         x = x + self.mlp(self.ln2(x))
         return x
+
+
+class KVCache(nn.Module):
+    def __init__(self, batch_size, block_size, n_heads, head_dim):
+        super().__init__()
+        cache_shape = (batch_size, n_heads, block_size, head_dim)
+        self.register_buffer("k_cache", torch.zeros(cache_shape))
+        self.register_buffer("v_cache", torch.zeros(cache_shape))
+
+    def update(self, input_pos, k_val, v_val):
+        # input_pos: [S], k_val: [B, H, S, D]
+        assert input_pos.size(0) == k_val.size(2)
+
+        k_out = self.k_cache
+        v_out = self.v_cache
+        k_out[:, :, input_pos] = k_val
+        v_out[:, :, input_pos] = v_val
+        return k_out, v_out
 
 
 class GPT(nn.Module):
@@ -117,16 +144,14 @@ class GPT(nn.Module):
 
         self.register_buffer("freqs_cis", freqs_cis)
 
-        self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta'),
-            drop = nn.Dropout(cfg.dropout), # drop token+position
-            blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)]),
-            ln = nn.LayerNorm(cfg.n_embd, bias=cfg.bias), # final layer norm
-        ))
+        self.wte = nn.Embedding(cfg.vocab_size, cfg.n_embd, device='meta')
+        self.drop = nn.Dropout(cfg.dropout) # drop token+position
+        self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)])
+        self.ln = nn.LayerNorm(cfg.n_embd, bias=cfg.bias) # final layer norm
 
         # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight
+        self.wte.weight = self.lm_head.weight
 
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
 
@@ -135,32 +160,56 @@ class GPT(nn.Module):
     def _reset_parameters(self):
         nn.init.xavier_uniform_(self.lm_head.weight)
 
+    def setup_caches(self, batch_size, block_size):
+        for b in self.blocks:
+            b.attn.kv_cache = KVCache(
+                batch_size,
+                block_size,
+                self.cfg.n_head,
+                self.cfg.n_embd // self.cfg.n_head,
+            )
+
     def get_num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
 
-    def forward(self, tokens, targets=None):
+    def forward(
+        self,
+        tokens: Tensor,
+        *,
+        input_pos: Optional[Tensor] = None,
+        targets: Optional[Tensor] = None,
+    ):
+        """
+        when input_pos is None, act like input_pos=torch.arange(T)
+        when targets is None, only return the logits
+        """
         B, T = tokens.size()
         assert T <= self.cfg.block_size, \
             f"Cannot forward sequence of length {T}, block size is only {self.cfg.block_size}"
+        
+        # set up position embeddings
+        if input_pos is None:
+            freqs_cis = self.freqs_cis[:T]
+        else:
+            assert input_pos.size(-1) == T, "input_pos must have the same length as tokens"
+            assert input_pos.dim() == 2, "input_pos musn't have batch dimension"
+            freqs_cis = self.freqs_cis[input_pos]
 
-        # forward the GPT model itself
-        tok_emb = self.transformer.wte(tokens)
-        # tested, useful
-        x = self.transformer.drop(tok_emb)
-        for block in self.transformer.blocks:
-            x = block(x, self.freqs_cis[:T, :])
-        x = self.transformer.ln(x)
+        tok_emb = self.wte(tokens)
+        x = self.drop(tok_emb)
+        for block in self.blocks:
+            x = block(x, freqs_cis, input_pos)
+        x = self.ln(x)
 
+        logits = self.lm_head(x)
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
+            # calculate loss
             loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+                logits.view(-1, logits.size(-1)), targets.view(-1).long(), ignore_index=-1
+            )
             return logits, loss
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             return logits
 
     def configure_optimizer(self, cfg):
@@ -187,39 +236,12 @@ class GPT(nn.Module):
 
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        logger.info(
+        logger.debug(
             f"num decayed parameter tensors: "
             f"{len(decay_params)}, with {num_decay_params:,} parameters")
-        logger.info(
+        logger.debug(
             f"num non-decayed parameter tensors: "
             f"{len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, fused=True)
         return optimizer
-
-    @torch.no_grad
-    def generate(self, tokens, max_new_tokens, temperature=1.0, topk=None):
-        """
-        tokens: (B, T), dtype=torch.int64
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-        for _ in range(max_new_tokens):
-            # crop conditioning tokens to block_size
-            if tokens.size(1) > self.cfg.block_size:
-                tokens_cond = tokens[:, -self.cfg.block_size:]
-            else:
-                tokens_cond = tokens
-
-            logits = self(tokens_cond)
-            logits = logits[:, -1, :] / temperature
-            if topk is not None:
-                v, _ = torch.topk(logits, k=min(topk, logits.size(-1)))
-                # torch.topk retuens are sorted
-                # so -1 is the smallest
-                logits[logits < v[:, [-1]]] = float('-inf')
-            probs = F.softmax(logits, dim=-1)
-            # although num_samples=1, it returns a (B, 1) tensor
-            next_token = torch.multinomial(probs, num_samples=1)
-
-            tokens = torch.cat((tokens, next_token), dim=1)
-        return tokens

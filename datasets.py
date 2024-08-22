@@ -18,13 +18,14 @@ class ShakespeareCharDataset(Dataset):
         self.file_path = file_path
         self.block_size = block_size
         self.data = torch.load(self.file_path, weights_only=True, mmap=True)
+        self.data = self.data.to(torch.int)
 
     def __len__(self):
         return len(self.data) - self.block_size
     
     def __getitem__(self, index):
-        x = self.data[index:index+self.block_size].long()
-        y = self.data[index+1:index+self.block_size+1].long()
+        x = self.data[index:index+self.block_size]
+        y = self.data[index+1:index+self.block_size+1]
         return x, y
     
 
