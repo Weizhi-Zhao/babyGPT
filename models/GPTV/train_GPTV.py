@@ -1,9 +1,9 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 from datasets import ImageCaptionDataset
 from tokenizer import Tokenizer
 from loguru import logger
-from models import GPTVSelfAttention
+from models import GPTV
 from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
 from utils import load_config, save_loss_fig, save_checkpoint
@@ -95,12 +95,8 @@ def set_lr(it, optimizer, cfg: DictConfig):
 
 def train(cfg):
     tokenizer = Tokenizer(cfg.meta_path)
-    train_set = ImageCaptionDataset(
-        Path(cfg.train_set_path), cfg.block_size, tokenizer, img_in_sa=True
-    )
-    val_set = ImageCaptionDataset(
-        Path(cfg.val_set_path), cfg.block_size, tokenizer, img_in_sa=True
-    )
+    train_set = ImageCaptionDataset(Path(cfg.train_set_path), cfg.block_size, tokenizer)
+    val_set = ImageCaptionDataset(Path(cfg.val_set_path), cfg.block_size, tokenizer)
     train_sampler = RandomSampler(
         train_set, replacement=True, num_samples=cfg.max_iters * cfg.batch_size
     )
@@ -112,7 +108,7 @@ def train(cfg):
     )
 
     with torch.device(device):
-        model = GPTVSelfAttention(cfg)
+        model = GPTV(cfg)
 
     optimizer = model.configure_optimizer(cfg)
 
@@ -190,7 +186,7 @@ python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b120 --save_log
 python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b10 --save_log
 
 image in self-attention
-python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa_b10 --save_log
+python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa --save_log
 python train_GPTV.py --config configs/GPTV.yaml --name test --save_log
 python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa_hwd --save_log
 '''

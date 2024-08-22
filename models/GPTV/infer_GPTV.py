@@ -1,6 +1,6 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-from models import GPTVSelfAttention
+from models import GPTV
 from utils import resume_checkpoint
 import argparse
 from pathlib import Path
@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 
 def stream_generator(
-    model: GPTVSelfAttention,
+    model: GPTV,
     device,
     prompt: str,
     image: torch.Tensor,
@@ -68,7 +68,7 @@ def inference(model, img: Path, encode, decode, device):
         img,
         encode,
         decode,
-        max_new_tokens=256 - 49,
+        max_new_tokens=256,
         top_k=20,
         temperature=0.5,
         start="<s>",
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     cfg = checkpoint["config"]
     cfg.pretrain = False
     with torch.device("meta"):
-        model = GPTVSelfAttention(cfg)
+        model = GPTV(cfg)
     model.load_state_dict(checkpoint["model"], assign=True)
     model = model.to(device=device)
 
@@ -107,10 +107,10 @@ if __name__ == '__main__':
     for img in tqdm(img_list):
         res = inference(model, img, encode, decode, device=device)
         result[img.name] = res
-    with open("output/results/result_sa_b30_i3000.yaml", "w", encoding='utf-8') as f:
+    with open("train_result.yaml", "w", encoding='utf-8') as f:
         yaml.dump(result, f, allow_unicode=True)
 
 """
 python infer_GPTV.py --ckpt checkpoints/ckpt_gptv_8_20.pt --img data/image_caption/Val
-python infer_GPTVsa.py --ckpt output/GPTV/GPTV_sa_b30/ckpt.pt --img data/image_caption/Val
+python infer_GPTV.py --ckpt checkpoints/ckpt_gptv_8_20.pt --img data/image_caption/Train
 """

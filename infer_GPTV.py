@@ -33,8 +33,8 @@ def stream_generator(
     tokens = encode(prompt)
     tokens = torch.tensor(tokens, device=device)
     for _ in range(max_new_tokens):
-        if tokens.size(0) > model.cfg.block_size:
-            tokens = tokens[-model.cfg.block_size:]
+        if tokens.size(0) > model.cfg.block_size - 49:
+            tokens = tokens[-(model.cfg.block_size - 49):]
         logits = model(image, tokens[None, :])
         logits = logits[0, -1, :] / temperature
         if top_k is not None:
@@ -68,8 +68,8 @@ def inference(model, img: Path, encode, decode, device):
         img,
         encode,
         decode,
-        max_new_tokens=256,
-        top_k=20,
+        max_new_tokens=256 - 49,
+        top_k=1,
         temperature=0.5,
         start="<s>",
         end="</s>",
@@ -107,10 +107,10 @@ if __name__ == '__main__':
     for img in tqdm(img_list):
         res = inference(model, img, encode, decode, device=device)
         result[img.name] = res
-    with open("train_result.yaml", "w", encoding='utf-8') as f:
+    with open("output/results/result_sa_b30_i3000_p100K.yaml", "w", encoding='utf-8') as f:
         yaml.dump(result, f, allow_unicode=True)
 
 """
-python infer_GPTV.py --ckpt checkpoints/ckpt_gptv_8_20.pt --img data/image_caption/Val
-python infer_GPTV.py --ckpt checkpoints/ckpt_gptv_8_20.pt --img data/image_caption/Train
+python infer_GPTV.py --ckpt output/GPTV/GPTV/GPTV_b30_i3k_p100k.pt --img data/image_caption/Val
+python infer_GPTVsa.py --ckpt output/GPTV/GPTV_sa_b30/ckpt.pt --img data/image_caption/Val
 """

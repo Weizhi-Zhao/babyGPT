@@ -1,16 +1,16 @@
 out_dir: 'output/GPTV'
-eval_interval: 200
+eval_interval: 100
 eval_num_samples: 2
 final_eval_samples: 400
 
 max_iters: 3000
 batch_size: 30
 num_workers: 30
-learning_rate: 3e-5
+learning_rate: 2e-5
 beta1: 0.9
 beta2: 0.999
 weight_decay: 0.1
 decay_lr:
   warmup_iters: 10
   lr_decay_iters: 3000
-  min_lr: 2e-6
+  min_lr: 1.5e-6

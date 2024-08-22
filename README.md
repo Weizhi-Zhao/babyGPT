@@ -39,6 +39,8 @@ python GPTV_pretrain.py --config configs/GPTV_pretrain.yaml --name GPTV_pretrain
 ```
 
 2. 训练视觉-语言多模态模型。
+
+请在`configs/GPTV.yaml`中修改`LM_pretrain_ckpt`为预训练权重的路径。
 ```bash
 python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
 ```
@@ -47,7 +49,7 @@ python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
 
 1. 生成测试集的图片描述。
 ```bash
-python infer_GPTV.py --ckpt checkpoints/ckpt.pt --img data/image_caption/Val
+python infer_GPTV.py --ckpt output/GPTV/GPTV/ckpt.pt --img data/image_caption/Val
 ```
 
 2. 为图片描述打分。

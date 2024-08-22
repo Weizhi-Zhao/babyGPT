@@ -74,7 +74,7 @@ class ImageCaptionDataset(Dataset):
     data: list[dict[img_path, caption]]
     the caption must has at least 1 tokens
     """
-    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer, img_in_sa=False):
+    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer, img_in_sa=True):
         self.data_path = data_path
         # self.data = torch.load(self.data_path, mmap=True)
         with open(self.data_path, 'r', encoding='utf-8') as f:

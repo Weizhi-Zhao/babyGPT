@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 from datasets import ImageCaptionDataset
 from tokenizer import Tokenizer
 from loguru import logger
@@ -182,11 +182,4 @@ if __name__ == "__main__":
 
 '''
 python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
-python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b120 --save_log
-python train_GPTV.py --config configs/GPTV.yaml --name GPTV_b10 --save_log
-
-image in self-attention
-python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa --save_log
-python train_GPTV.py --config configs/GPTV.yaml --name test --save_log
-python train_GPTV.py --config configs/GPTV.yaml --name GPTV_sa_hwd --save_log
 '''

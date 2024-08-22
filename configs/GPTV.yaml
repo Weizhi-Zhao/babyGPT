@@ -3,7 +3,7 @@ optimizer: 'configs/optimizers/GPTV_optim.yaml'
 dataset: 'configs/datasets/image_caption_set.yaml'
 
 pretrain: True
-LM_pretrain_ckpt: 'output/GPTV_pretrain/GPTV_pretrain/ckpt.pt'
+LM_pretrain_ckpt: 'output/GPTV_pretrain/GPTV_pretrain_100k/ckpt.pt'
 # pretrain: False
 
 max_new_tokens: 512
