@@ -2,7 +2,7 @@ n_layer: 6
 n_head: 6
 n_embd: 384
 dropout: 0.3
-block_size: 256
+block_size: 512
 bias: False
 
 rope_base: 10000

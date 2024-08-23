@@ -1,4 +1,5 @@
 import yaml
+import json
 import os
 import regex
 import pickle
@@ -16,19 +17,19 @@ def main():
         + r"\u3010|\u3011|\u300e|\u300f|\u300c|\u300d|\ufe43|\ufe44|\u3014|\u3015|"
         + r"\u2026|\u2014|\uff5e|\ufe4f|\uffe5]"
         + r"|(?i:'s|'t|'re|'ve|'m|'ll|'d)"
-        + r"|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1}"
+        + r"|[^\r\n\p{L}\p{N}]?[a-zA-Z]+|\p{N}{1}"
         + r"| ?[^\s\p{L}\p{N}\p{Han}</s><s>]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
     )
     pattern = regex.compile(pat_str)
 
     # NLP dataset
-    with open("nlp_train.yaml", "r", encoding="utf") as f:
+    with open("nlp_train.yaml", "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     prepared_data = []
     unique_chars = set()
     for k, v in data.items():
-        img_path = os.path.join("nlp_dataset/Train", k)
-        caption: str = v["prompt/prompt_en/simple/l"]
+        img_path = os.path.join("Train", k)
+        caption: str = v["请简要描述这张图片"]
         # clean the data
         caption = caption.replace("<s>", "")
         caption = caption.replace("</s>", " ")
@@ -38,6 +39,24 @@ def main():
         prepared_data.append({"img": img_path, "caption": caption})
         caption_split_list = pattern.findall(caption)
         unique_chars.update(set(caption_split_list))
+    with open("train_data.json", "w", encoding="utf-8") as f:
+        json.dump(prepared_data, f, ensure_ascii=False, indent=4)
+
+    # val_data
+    validation_data = []
+    with open("nlp_val.yaml", "r", encoding="utf-8") as f:
+        val_data = yaml.safe_load(f)
+    for k, v in val_data.items():
+        img_path = os.path.join("Val", k)
+        caption: str = v["请简要描述这张图片"]
+        caption = caption.replace("<s>", "")
+        caption = caption.replace("</s>", " ")
+        caption = caption.strip()
+
+        caption = "<s>" + caption + "</s>"
+        validation_data.append({"img": img_path, "caption": caption})
+    with open("val_data.json", "w", encoding="utf-8") as f:
+        json.dump(validation_data, f, ensure_ascii=False, indent=4)
 
     # pretrain data
     with open("./pretrain/data.txt", "r", encoding="utf-8") as f:
@@ -65,15 +84,12 @@ def main():
 
     # test
     tn = Tokenizer("meta.pkl")
-    print(pattern.findall("<s>Hello's World.\n</s>从一些测试中得出结论？! </s>"))
-    print(tn.decode(tn.encode("<s>Hello's World.\n </s>从一些测试中得出结论？</s>")))
+    print(pattern.findall("</s>从一些测试中得出结论？! </s>"))
+    print(tn.decode(tn.encode("</s>从一些测试中得出结论？</s>")))
 
     # save pretrain data
     pretrain_data_tensor = torch.tensor(tn.encode(pretrain_data), dtype=torch.long)
     torch.save(pretrain_data_tensor, "pretrain_data.pt")
-
-    with open("data.yaml", "w", encoding="utf-8") as f:
-        yaml.dump(prepared_data, f, allow_unicode=True)
 
 
 if __name__ == "__main__":

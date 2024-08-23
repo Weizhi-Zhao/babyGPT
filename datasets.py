@@ -10,7 +10,7 @@ from torchvision import transforms
 import pickle
 import random
 import torch
-import yaml
+import json
 
 
 class ShakespeareCharDataset(Dataset):
@@ -18,13 +18,14 @@ class ShakespeareCharDataset(Dataset):
         self.file_path = file_path
         self.block_size = block_size
         self.data = torch.load(self.file_path, weights_only=True, mmap=True)
+        self.data = self.data.to(torch.int)
 
     def __len__(self):
         return len(self.data) - self.block_size
     
     def __getitem__(self, index):
-        x = self.data[index:index+self.block_size].long()
-        y = self.data[index+1:index+self.block_size+1].long()
+        x = self.data[index:index+self.block_size]
+        y = self.data[index+1:index+self.block_size+1]
         return x, y
     
 
@@ -74,12 +75,14 @@ class ImageCaptionDataset(Dataset):
     data: list[dict[img_path, caption]]
     the caption must has at least 1 tokens
     """
-    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer):
+    def __init__(self, data_path: Path, block_size, tokenizer: Tokenizer, img_in_sa=True):
         self.data_path = data_path
         # self.data = torch.load(self.data_path, mmap=True)
-        with open(self.data_path / 'data.yaml', 'r', encoding='utf-8') as f:
-            self.data = yaml.safe_load(f)
+        with open(self.data_path, 'r', encoding='utf-8') as f:
+            self.data = json.load(f)
         self.block_size = block_size
+        if img_in_sa:
+            self.block_size -= 49
         self.tokenizer = tokenizer
         self.transform = transforms.Compose([
             transforms.ToTensor(),
@@ -92,15 +95,19 @@ class ImageCaptionDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, index):
-        img_path = self.data_path / self.data[index]['img']
+        img_path = self.data_path.parent / self.data[index]['img']
         img = Image.open(img_path).convert('RGB')
         img = self.transform(img)
         caption = self.data[index]['caption']
         tokens = self.tokenizer.encode(caption)
         tokens_len = len(tokens)
         # [0, 1, 2, 3, 4, 5]
-        x_start = random.randint(0, tokens_len - 2)
-        y_end = min(x_start + self.block_size, tokens_len)
+        if tokens_len <= self.block_size + 1:
+            x_start = 0
+            y_end = tokens_len
+        else:
+            x_start = random.randint(0, tokens_len - self.block_size - 1)
+            y_end = x_start + self.block_size + 1
         if y_end - x_start - 1 < self.block_size:
             x_pad = torch.ones(self.block_size - (y_end - 1 - x_start), dtype=torch.long)
             y_pad = -torch.ones(self.block_size - (y_end - 1 - x_start), dtype=torch.long)
@@ -115,6 +122,19 @@ class ImageCaptionDataset(Dataset):
         assert y.size(0) == self.block_size, f"y.size(0) = {y.size(0)}, self.block_size = {self.block_size}"
         return img, x, y
 
+
+class PretrainDataset(Dataset):
+    def __init__(self, data_path, block_size):
+        self.data = torch.load(data_path, mmap=True, weights_only=True)
+        self.block_size = block_size
+
+    def __len__(self):
+        return len(self.data) - self.block_size
+    
+    def __getitem__(self, index):
+        x = self.data[index:index+self.block_size]
+        y = self.data[index+1:index+self.block_size+1]
+        return x, y
 
 
 DATASETS = {

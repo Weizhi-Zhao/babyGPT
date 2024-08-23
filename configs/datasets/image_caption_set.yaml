@@ -1,5 +1,5 @@
 dataset_name: image_caption
-train_set_path: "data/image_caption"
-# test_set_path: "data/chinese_poetry/test.pt"
+train_set_path: "data/image_caption/train_data.json"
+val_set_path: "data/image_caption/val_data.json"
 meta_path: "data/image_caption/meta.pkl"
-vocab_size: 12946
+vocab_size: 8981

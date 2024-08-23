@@ -1,8 +1,12 @@
-model: 'configs/models/babyGPTV.yaml'
+model: 'configs/models/GPTV.yaml'
 optimizer: 'configs/optimizers/GPTV_optim.yaml'
 dataset: 'configs/datasets/image_caption_set.yaml'
 
-max_new_tokens: 1024
+pretrain: True
+LM_pretrain_ckpt: 'output/GPTV_pretrain/GPTV_pretrain_100k/ckpt.pt'
+# pretrain: False
+
+max_new_tokens: 512
 condition_prompt: "<s>"
 temperature: 0.7
 top_k: 50

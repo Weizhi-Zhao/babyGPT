@@ -1,0 +1,9 @@
+model: 'configs/models/GPTV.yaml'
+optimizer: 'configs/optimizers/GPTV_pretrain_optim.yaml'
+dataset: 'configs/datasets/pretrain_set.yaml'
+
+max_new_tokens: 512
+condition_prompt: "<s>"
+temperature: 0.7
+top_k: 50
+seed: 321

@@ -5,6 +5,7 @@ for simple dataset like shakepeare, use itoa and ctoi in meta.pkl as tokenizer
 from pathlib import Path
 import pickle
 import regex
+from loguru import logger
 
 class Tokenizer:
     """
@@ -16,7 +17,7 @@ class Tokenizer:
         self.ctoi = meta['ctoi']
         self.itoc = meta['itoc']
         # thanks to llama3, add Chinese and <s> </s>
-        pat_str = meta['pat_str']
+        pat_str = meta['pattern_str']
         self.pattern = regex.compile(pat_str)
 
         self._vocab_size = meta['vocab_size']
@@ -26,7 +27,13 @@ class Tokenizer:
 
     def encode(self, text: str) -> list:
         text_list = self.pattern.findall(text)
-        tokens = [self.ctoi[c] for c in text_list]
+        tokens = []
+        for c in text_list:
+            t = self.ctoi.get(c)
+            if t is None:
+                t = self.ctoi[' ']
+                logger.debug(f'unknown token: {c}')
+            tokens.append(t)
         return tokens
 
     def decode(self, tokens: list[int]) -> str:

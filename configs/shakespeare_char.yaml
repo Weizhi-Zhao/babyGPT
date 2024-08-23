@@ -2,8 +2,4 @@ model: 'configs/models/babyGPT_rope.yaml'
 optimizer: 'configs/optimizers/default_AdamW.yaml'
 dataset: 'configs/datasets/shakespeare_char_set.yaml'
 
-max_new_tokens: 500
-condition_prompt: "\n"
-temperature: 0.8
-top_k: 200
 seed: 321

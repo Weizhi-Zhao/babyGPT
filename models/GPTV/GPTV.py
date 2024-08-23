@@ -5,6 +5,10 @@ import torch
 from loguru import logger
 from .resnet import ResNet18
 
+"""
+for testing image token in self-attention
+"""
+
 
 def precompute_freqs_cis(dim: int, seq_len: int, rope_base=10000.0):
     assert(dim % 2 == 0), "dim must be an even number"
@@ -27,7 +31,11 @@ def apply_RoPE(x: torch.Tensor, freqs_cis: torch.Tensor):
     return x
 
 
-class CausalSelfAttention(nn.Module):
+class ImageSelfAttention(nn.Module):
+    """
+    the first 49 tokens are image tokens
+    all tokens can attend to image tokens
+    """
     def __init__(self, cfg: DictConfig):
         super().__init__()
         assert cfg.n_embd % cfg.n_head == 0, \
@@ -39,6 +47,12 @@ class CausalSelfAttention(nn.Module):
         self.drop_p = cfg.dropout
         self.drop = nn.Dropout(cfg.dropout)
         self.n_head = cfg.n_head
+
+        attn_mask = torch.tril(
+            torch.ones(cfg.block_size, cfg.block_size, dtype=torch.bool)
+        )
+        attn_mask[:49, :49] = True
+        self.register_buffer("attn_mask", attn_mask)
 
         self._reset_parameters()
 
@@ -60,51 +74,16 @@ class CausalSelfAttention(nn.Module):
         k = apply_RoPE(k, freqs_cis)
 
         y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.drop_p if self.training else 0, is_causal=True
+            q,
+            k,
+            v,
+            attn_mask=self.attn_mask[:T, :T],
+            dropout_p=self.drop_p if self.training else 0,
         )
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
 
         return self.drop(self.proj(y))
-
-
-class CrossAttention(nn.Module):
-    def __init__(self, cfg: DictConfig):
-        super().__init__()
-        assert cfg.n_embd % cfg.n_head == 0, \
-            "Embedding size must be an integer multiple of the number of heads"
-
-        self.wq = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
-        self.wkv = nn.Linear(cfg.n_embd, 2 * cfg.n_embd, bias=cfg.bias)
-        self.proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
-
-        self.drop_p = cfg.dropout
-        self.drop = nn.Dropout(cfg.dropout)
-        self.n_head = cfg.n_head
-
-        self._reset_parameters()
-
-    def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.wq.weight)
-        nn.init.xavier_uniform_(self.proj.weight)
-
-    def forward(self, x: torch.Tensor, mem: torch.Tensor):
-        assert x.size(-1) == mem.size(-1), "x and mem must have the same embedding size"
-        B, T, C = x.size()
-        T_MEM = mem.size(1)
-        q = self.wq(x)
-        k, v = self.wkv(mem).chunk(2, dim=-1)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T_MEM, self.n_head, C // self.n_head).transpose(1, 2)
-        v = v.view(B, T_MEM, self.n_head, C // self.n_head).transpose(1, 2)
-
-        y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.drop_p if self.training else 0
-        )
-
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.proj(self.drop(y))
-
 
 class MLP(nn.Module):
     def __init__(self, cfg):
@@ -131,15 +110,16 @@ class Block(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.ln1 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.self_attn = CausalSelfAttention(cfg)
-        self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.cross_attn = CrossAttention(cfg)
+        self.self_attn = ImageSelfAttention(cfg)
+        # self.self_attn = CausalSelfAttention(cfg)
+        # self.ln2 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
+        # self.cross_attn = CrossAttention(cfg)
         self.ln3 = nn.LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.mlp = MLP(cfg)
 
-    def forward(self, x, mem, freqs_cis: torch.Tensor):
+    def forward(self, x, freqs_cis: torch.Tensor):
         x = x + self.self_attn(self.ln1(x), freqs_cis)
-        x = x + self.cross_attn(self.ln2(x), mem)
+        # x = x + self.cross_attn(self.ln2(x), mem)
         x = x + self.mlp(self.ln3(x))
         return x
 
@@ -168,12 +148,17 @@ class GPTV(nn.Module):
 
         self.vision_model = ResNet18(self.cfg.n_embd)
 
-        if cfg.pretrain:
-            self.vision_model.init_from_pretrain()
-
         # meta device really saves memory
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.language_model.wte.weight = self.lm_head.weight
+
+        if cfg.pretrain:
+            self.vision_model.init_from_pretrain()
+            self.load_state_dict(
+                torch.load(cfg.LM_pretrain_ckpt, mmap=True)["model"],
+                strict=False,
+            )
+            logger.info("pre-trained parameters loaded")
 
         logger.info(f"GPT parameter number: {self.get_num_params()/1e6:.2f}M")
 
@@ -188,18 +173,23 @@ class GPTV(nn.Module):
 
     def forward(self, image, tokens, targets=None):
         B, T = tokens.size()
+        img_tokens = self.vision_model(image)
+
+        T = T + img_tokens.size(1)
 
         assert T <= self.cfg.block_size, \
             f"Cannot forward sequence of length {T}, block size is only {self.cfg.block_size}"
 
-        img_mem = self.vision_model(image)
         # forward the GPT model itself
         tok_emb = self.language_model.wte(tokens)
+        tok_emb = torch.cat((img_tokens, tok_emb), dim=1)
         # tested, useful
         x = self.language_model.drop(tok_emb)
         for block in self.language_model.blocks:
-            x = block(x, img_mem, self.freqs_cis[:T, :])
+            x = block(x, self.freqs_cis[:T, :])
         x = self.language_model.ln(x)
+
+        x = x[:, 49:, :] # crop image tokens
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss

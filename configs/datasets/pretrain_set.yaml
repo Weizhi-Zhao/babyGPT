@@ -1,0 +1,4 @@
+dataset_name: pretrain_dataset
+train_set_path: "data/image_caption/pretrain_data.pt"
+meta_path: "data/image_caption/meta.pkl"
+vocab_size: 8981

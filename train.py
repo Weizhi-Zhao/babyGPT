@@ -9,10 +9,9 @@
 # TODO: add chinese dataset
 # TODO: KV cache
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 from datasets import DATASETS
 from loguru import logger
-from matplotlib import pyplot as plt
 from models import GPT
 from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
@@ -59,7 +58,7 @@ def estimate_loss(model, train_set, test_set, cfg, eval_num_samples=None):
     for x, y in eval_train_loader:
         x = x.to(device)
         y = y.to(device)
-        logits, loss = model(x, y)
+        logits, loss = model(x, targets=y)
         losses.append(loss.item())
     out['train'] = sum(losses) / len(losses)
 
@@ -67,7 +66,7 @@ def estimate_loss(model, train_set, test_set, cfg, eval_num_samples=None):
     for x, y in eval_test_loader:
         x = x.to(device)
         y = y.to(device)
-        logits, loss = model(x, y)
+        logits, loss = model(x, targets=y)
         losses.append(loss.item())
     out['test'] = sum(losses) / len(losses)
 
@@ -106,7 +105,7 @@ def train(cfg):
         train_set, replacement=True, num_samples=cfg.max_iters * cfg.batch_size)
     # pin memory? useless
     train_loader = DataLoader(
-        train_set, batch_size=cfg.batch_size, sampler=train_sampler)
+        train_set, batch_size=cfg.batch_size, sampler=train_sampler, num_workers=cfg.num_workers)
     with torch.device(device):
         model = GPT(cfg)
     optimizer = model.configure_optimizer(cfg)
@@ -122,7 +121,7 @@ def train(cfg):
         set_lr(iter_num, optimizer, cfg)
         x = batch[0].to(device)
         y = batch[1].to(device)
-        logits, loss = model(x, y)
+        logits, loss = model(x, targets=y)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
