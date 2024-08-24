@@ -52,7 +52,28 @@ python train_GPTV.py --config configs/GPTV.yaml --name GPTV --save_log
 python infer_GPTV.py --ckpt output/GPTV/GPTV/ckpt.pt --img data/image_caption/Val
 ```
 
-2. 为图片描述打分。
-```bash
-python ???
+2. 为图片描述打分。以下为使用`metrics.py`进行评分的程序示例。
+```python
+candidate_description = "一只猫坐在窗台上看着外面的鸟儿。"
+reference_descriptions = [
+    "一只猫坐在窗台上。",
+    "猫儿在窗台上观察鸟儿。",
+    "窗台上的猫正在看鸟儿。"
+]
+
+print(meteor_zh(candidate_description,reference_descriptions,0.9,3.0,0.5))
+print(cider_zh(candidate_description,reference_descriptions))
+print(bleu_zh(candidate_description,reference_descriptions,4,5))
+
+
+candidate_description = "A cat sitting on a window ledge watching the birds."
+reference_descriptions = [
+    "A cat is sitting on a window ledge.",
+    "A cat observing the birds from the window.",
+    "A cat is watching the birds from the window ledge."
+]
+
+print(meteor_en(candidate_description,reference_descriptions,0.9,3.0,0.5))
+print(cider_en(candidate_description,reference_descriptions))
+print(bleu_en(candidate_description,reference_descriptions,4,5))
 ```
