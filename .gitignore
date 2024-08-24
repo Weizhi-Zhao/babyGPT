@@ -22,3 +22,4 @@ data/image_caption/val_data.json
 data/image_caption/meta.pkl
 data/image_caption/pretrain/part-000001-28feace1.jsonl
 data/image_caption/pretrain/part-000001-28feace1.jsonl.tar.gz
+/.VSCodeCounter

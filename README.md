@@ -20,7 +20,7 @@ pip install -r requirements.txt
 cd data/image_caption/
 python nlp_gen_data.py
 ```
-3. 准备预训练数据，下载[书生·万象数据集](https://opendatalab.com/OpenDataLab/WanJuan1_dot_0)中的jsonl文件（一个压缩包即可），解压到`data/image_caption/pretrain/`路径下，执行`prepare.py`生成预训练数据。
+3. 准备预训练数据，下载[书生·万卷数据集](https://opendatalab.com/OpenDataLab/WanJuan1_dot_0)中的jsonl文件（一个压缩包即可），解压到`data/image_caption/pretrain/`路径下，执行`prepare.py`生成预训练数据。
 ```bash
 cd data/image_caption/pretrain
 python prepare.py
