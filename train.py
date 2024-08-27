@@ -142,10 +142,6 @@ def train(cfg):
 
     # save config yaml
     OmegaConf.save(cfg, os.path.join(cfg.out_dir, 'config.yaml'))
-    
-    test_generation = generate_one_sequence(model, device, cfg)
-    with open(os.path.join(cfg.out_dir, 'test_generation.txt'), 'w') as f:
-        f.write(test_generation)
 
     logger.info(f"{torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB "
                 "CUDA memory allocated for training")
@@ -251,4 +247,8 @@ python train.py --config configs/sc_drop.yaml --name drop03 --debug --save_log
 
 18. test silu
 python train.py --config configs/shakespeare_char.yaml --name silu --debug --save_log
+'''
+'''
+19. KV cacke
+python train.py --config configs/shakespeare_char.yaml --name kv_cache --debug --save_log
 '''

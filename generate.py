@@ -13,7 +13,7 @@ import pickle
 
 
 TEMPERATURE = 1
-TOP_K = 5
+TOP_K = 1
 TEST_TIMES = 10
 
 def sample(logits: Tensor) -> Tensor:
@@ -26,7 +26,6 @@ def sample(logits: Tensor) -> Tensor:
     assert logits.size(0) == 1 and logits.size(1) == 1
     # sequeeze the seq dim
     probs = logits[:, 0, :] / TEMPERATURE
-    breakpoint()
     if TOP_K is not None:
         v, _ = torch.topk(probs, min(TOP_K, probs.size(-1)))
         pivot = v[0, -1]
@@ -39,7 +38,8 @@ def sample(logits: Tensor) -> Tensor:
     return token_next
 
 def prefill(model: GPT, x: Tensor, input_pos: Tensor) -> Tensor:
-    logits = model(x, input_pos)
+    # breakpoint()
+    logits = model(x, input_pos=input_pos)
     return sample(logits)
 
 def decode_one_token(model: GPT, token: Tensor, input_pos: Tensor) -> Tensor:
@@ -48,7 +48,8 @@ def decode_one_token(model: GPT, token: Tensor, input_pos: Tensor) -> Tensor:
     assert token.dim() == 2
     assert token.size(0) == 1 and token.size(1) == 1, "token should be a 2D tensor: [1, 1]"
 
-    logits = model(token, input_pos)
+    # breakpoint()
+    logits = model(token, input_pos=input_pos)
     return sample(logits)
 
 def decode_n_token(
@@ -69,7 +70,7 @@ def decode_n_token(
 
 @torch.no_grad
 def generate(
-    model: GPT, prompt: Tensor, max_new_tokens: int, end_token: Optional[int] = None
+    model: GPT, prompt: Tensor, max_tokens: int, end_token: Optional[int] = None
 ) -> Generator[int, None, None]:
     assert prompt.dim() == 1, "prompt should be a 1D tensor"
     device = prompt.device
@@ -77,10 +78,10 @@ def generate(
         model.setup_caches(batch_size=1, block_size=model.cfg.block_size)
 
     T = prompt.size(0)
-    T_NEW = T + max_new_tokens
+    T_NEW = max_tokens - T
     input_pos = torch.arange(0, T, device=device)
 
-    next_token = prefill(model, prompt[None, :], input_pos[:])
+    next_token = prefill(model, prompt[None, :], input_pos)
     yield next_token
 
     input_pos = torch.tensor([T], dtype=torch.int, device=device)
@@ -88,7 +89,7 @@ def generate(
         model,
         next_token,
         input_pos,
-        max_new_tokens - 1,
+        T_NEW - 1,
     )
 
 
@@ -127,38 +128,6 @@ def stream_generator(
         yield next_char
 
 
-def inference(ckpt: Path, device):
-    model, meta = resume_checkpoint(ckpt, device, inference=True)
-    model.eval()
-    ctoi = meta['ctoi']
-    itoc = meta['itoc']
-    encode = lambda s: [ctoi[c] for c in s]
-    decode = lambda t: "".join(itoc[i] for i in t)
-    while True:
-        prompt = input("请输入提示词：")
-        if prompt == "exit":
-            break
-        generator = stream_generator(
-            model,
-            device,
-            prompt + '\n',
-            encode,
-            decode,
-            max_new_tokens=500,
-            top_k=50,
-            temperature=0.7,
-            start="s",
-            end="e",
-        )
-
-        print('\n' + prompt + '\n', end="", flush=True)
-        for char in generator:
-            print(char, end="", flush=True)
-            # time.sleep(0.1)
-        print('\n\n')
-        # time.sleep(3)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True)
@@ -167,13 +136,13 @@ if __name__ == '__main__':
 
     # inference(ckpt=args.ckpt, device=device)
 
-    checkpoint = torch.load(args.ckpt, mmap=True, weights_only=True)
-    with torch.device('meta'):
-        model = GPT(checkpoint['cfg'])
-    model.load_state_dict(checkpoint['model'], assign=True)
+    checkpoint = torch.load(args.ckpt, mmap=True)
+    with torch.device(device):
+        model = GPT(checkpoint['config'])
+    model.load_state_dict(checkpoint['model'], assign=True, strict=False)
     model = model.to(device)
     model.eval()
-    with open(checkpoint['cfg'].meta_path, 'rb') as f:
+    with open(checkpoint['config'].meta_path, 'rb') as f:
         meta = pickle.load(f)
     ctoi = meta['ctoi']
     itoc = meta['itoc']
@@ -181,12 +150,29 @@ if __name__ == '__main__':
     decode = lambda t: "".join(itoc[i] for i in t)
 
     start = time.perf_counter()
-    for _ in TEST_TIMES:
-        for t in generate(model, encode('a'), 512):
-            print(decode([t.item()]), end='', flush=True)
-    print(f"TIME: {time.perf_counter() - start:.2f}")
+    result = ''
+    for _ in range(TEST_TIMES):
+        # for t in generate(model, torch.tensor(encode('A'), device=device), max_tokens=512):
+        #     print(decode([t.item()]), end='', flush=True)
+
+        # result = ''.join((decode([t.item()]) for t in generate(model, torch.tensor(encode('A'), device=device), max_tokens=512)))
+        
+
+        generator = stream_generator(
+            model,
+            device,
+            "A",
+            encode,
+            decode,
+            max_new_tokens=512-1,
+            top_k=TOP_K,
+            temperature=TEMPERATURE
+        )
+        result = ''.join(generator)
+    print(f"TIME: {time.perf_counter() - start:.2f}s")
+    print(result)
 
 
 """
-python inference.py --ckpt output/chinese_poetry/Chinese_poetry/ckpt.pt
+python generate.py --ckpt output/shakespeare_char/kv_cache/ckpt.pt
 """
