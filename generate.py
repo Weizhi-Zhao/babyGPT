@@ -74,8 +74,6 @@ def generate(
 ) -> Generator[int, None, None]:
     assert prompt.dim() == 1, "prompt should be a 1D tensor"
     device = prompt.device
-    with torch.device(device):
-        model.setup_caches(batch_size=1, block_size=model.cfg.block_size)
 
     T = prompt.size(0)
     T_NEW = max_tokens - T
@@ -141,6 +139,15 @@ if __name__ == '__main__':
         model = GPT(checkpoint['config'])
     model.load_state_dict(checkpoint['model'], assign=True, strict=False)
     model = model.to(device)
+    with torch.device(device):
+        model.setup_caches(batch_size=1, block_size=model.cfg.block_size)
+
+    # compile
+    # model = torch.compile(model)
+    # model = torch.compile(model, mode="reduce-overhead")
+    # model = torch.compile(model, fullgraph=True, dynamic=True)
+
+
     model.eval()
     with open(checkpoint['config'].meta_path, 'rb') as f:
         meta = pickle.load(f)
@@ -151,28 +158,29 @@ if __name__ == '__main__':
 
     start = time.perf_counter()
     result = ''
-    for _ in range(TEST_TIMES):
-        # for t in generate(model, torch.tensor(encode('A'), device=device), max_tokens=512):
-        #     print(decode([t.item()]), end='', flush=True)
+    for t in range(TEST_TIMES):
+        sub_start = time.perf_counter()
 
-        # result = ''.join((decode([t.item()]) for t in generate(model, torch.tensor(encode('A'), device=device), max_tokens=512)))
+        result = ''.join((decode([t.item()]) for t in generate(model, torch.tensor(encode('A'), device=device), max_tokens=512)))
         
 
-        generator = stream_generator(
-            model,
-            device,
-            "A",
-            encode,
-            decode,
-            max_new_tokens=512-1,
-            top_k=TOP_K,
-            temperature=TEMPERATURE
-        )
-        result = ''.join(generator)
+        # generator = stream_generator(
+        #     model,
+        #     device,
+        #     "A",
+        #     encode,
+        #     decode,
+        #     max_new_tokens=512-1,
+        #     top_k=TOP_K,
+        #     temperature=TEMPERATURE
+        # )
+        # result = ''.join(generator)
+
+        print(f"{t + 1}: {time.perf_counter() - sub_start:.2f}s")
     print(f"TIME: {time.perf_counter() - start:.2f}s")
-    print(result)
+    # print(result)
 
 
 """
-python generate.py --ckpt output/shakespeare_char/kv_cache/ckpt.pt
+python generate.py --ckpt checkpoints/s_char.pt
 """

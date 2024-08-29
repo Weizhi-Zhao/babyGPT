@@ -63,8 +63,8 @@ class CausalSelfAttention(nn.Module):
         q = apply_RoPE(q, freqs_cis)
         k = apply_RoPE(k, freqs_cis)
 
-        if self.kv_cache is not None:
-            assert input_pos is not None, "input_pos must be provided for KV cache"
+        if self.kv_cache is not None and input_pos is not None:
+            # assert input_pos is not None, "input_pos must be provided for KV cache"
             k, v = self.kv_cache.update(input_pos, k, v)
 
         y = F.scaled_dot_product_attention(
